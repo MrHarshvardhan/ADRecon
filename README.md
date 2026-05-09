@@ -2,8 +2,6 @@
 
 > Community-built Active Directory & Azure AD security audit toolkit — no third-party tools, no RSAT required.
 
-**GitHub:** [github.com/MrHarshvardhan/ADRecon](https://github.com/MrHarshvardhan/ADRecon)
-
 ---
 
 ## What is AD-Recon?
