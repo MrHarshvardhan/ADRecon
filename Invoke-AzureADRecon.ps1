@@ -157,6 +157,14 @@ $Script:MitreTTPMap = @{
     'AZ-HighRiskUsers'        = 'T1078.004'
     'AZ-FederatedDomain'      = 'T1199'
     'AZ-PwdNeverExpires'      = 'T1078.004'
+    'AZ-StaleUser'            = 'T1078.004'
+    'AZ-PwdNeverExpiresUser'  = 'T1078.004'
+    'AZ-DisabledUserLicensed' = 'T1078.004'
+    'AZ-OAuthConsent'         = 'T1528'
+    'AZ-StaleDevice'          = 'T1078.004'
+    'AZ-NonCompliantDevice'   = 'T1078.004'
+    'AZ-SSPRWeakMethod'       = 'T1621'
+    'AZ-SyncedAdmin'          = 'T1078.004'
 }
 $Script:FailedModules = [System.Collections.Generic.List[hashtable]]::new()
 $Script:Token         = $null
@@ -905,6 +913,331 @@ function Invoke-CheckDomains {
 
 #endregion
 
+#region ── CHECK: User Inventory ──────────────────────────────────────────────
+
+$Script:UserInventory = @()
+
+function Invoke-CheckUserInventory {
+    Write-Status "Collecting full user inventory and configuration issues..."
+
+    $select = 'id,displayName,userPrincipalName,accountEnabled,userType,createdDateTime,passwordPolicies,assignedLicenses,onPremisesSyncEnabled,department,jobTitle,signInActivity'
+    $users  = Get-GraphAll -Uri "https://graph.microsoft.com/v1.0/users?`$select=$select&`$top=999"
+
+    $now = Get-Date
+
+    $staleAccounts    = [System.Collections.Generic.List[hashtable]]::new()
+    $pwdNeverExpires  = [System.Collections.Generic.List[hashtable]]::new()
+    $disabledLicensed = [System.Collections.Generic.List[hashtable]]::new()
+    $allUserRows      = [System.Collections.Generic.List[hashtable]]::new()
+
+    $enabledCount = 0; $disabledCount = 0; $syncedCount = 0; $cloudCount = 0
+
+    foreach ($u in $users) {
+        if ($u.userType -eq 'Guest') { continue }
+
+        $isEnabled  = $u.accountEnabled -eq $true
+        $isSynced   = $u.onPremisesSyncEnabled -eq $true
+        $isLicensed = $u.assignedLicenses -and $u.assignedLicenses.Count -gt 0
+        $pwdNeverExp= $u.passwordPolicies -and ($u.passwordPolicies -match 'DisablePasswordExpiration')
+
+        $lastSignInStr   = 'N/A (P1 required)'
+        $daysSinceSignIn = $null
+        if ($u.signInActivity -and $u.signInActivity.lastSignInDateTime) {
+            $lastSignIn      = [datetime]$u.signInActivity.lastSignInDateTime
+            $daysSinceSignIn = [int]($now - $lastSignIn).TotalDays
+            $lastSignInStr   = $lastSignIn.ToString('yyyy-MM-dd')
+        }
+
+        if ($isEnabled)  { $enabledCount++  } else { $disabledCount++ }
+        if ($isSynced)   { $syncedCount++   } else { $cloudCount++ }
+
+        $issues = @()
+        if ($daysSinceSignIn -and $daysSinceSignIn -gt 90) { $issues += "Stale (${daysSinceSignIn}d)" }
+        if ($pwdNeverExp)                                   { $issues += 'PwdNeverExpires' }
+        if (-not $isEnabled -and $isLicensed)               { $issues += 'DisabledButLicensed' }
+
+        $allUserRows.Add(@{
+            Name       = "$($u.displayName)"
+            UPN        = "$($u.userPrincipalName)"
+            Enabled    = if ($isEnabled) { 'Yes' } else { 'No' }
+            Source     = if ($isSynced) { 'Synced' } else { 'Cloud' }
+            LastSignIn = $lastSignInStr
+            PwdExpires = if ($pwdNeverExp) { 'Never' } else { 'Normal' }
+            Licensed   = if ($isLicensed) { 'Yes' } else { 'No' }
+            Department = "$($u.department)"
+            Issues     = if ($issues.Count -gt 0) { $issues -join '; ' } else { 'None' }
+        }) | Out-Null
+
+        if ($isEnabled -and $daysSinceSignIn -and $daysSinceSignIn -gt 90) {
+            $staleAccounts.Add(@{
+                Name      = "$($u.displayName)"
+                UPN       = "$($u.userPrincipalName)"
+                LastSignIn= $lastSignInStr
+                DaysIdle  = $daysSinceSignIn
+                Licensed  = if ($isLicensed) { 'Yes' } else { 'No' }
+                Dept      = "$($u.department)"
+            }) | Out-Null
+        }
+
+        if ($isEnabled -and $pwdNeverExp) {
+            $pwdNeverExpires.Add(@{
+                Name   = "$($u.displayName)"
+                UPN    = "$($u.userPrincipalName)"
+                Dept   = "$($u.department)"
+                Source = if ($isSynced) { 'Synced' } else { 'Cloud' }
+            }) | Out-Null
+        }
+
+        if (-not $isEnabled -and $isLicensed) {
+            $disabledLicensed.Add(@{
+                Name     = "$($u.displayName)"
+                UPN      = "$($u.userPrincipalName)"
+                Licenses = $u.assignedLicenses.Count
+            }) | Out-Null
+        }
+    }
+
+    $Script:UserInventory                = @($allUserRows)
+    $Script:TenantData['TotalUsers']     = $users.Count
+    $Script:TenantData['EnabledUsers']   = $enabledCount
+    $Script:TenantData['DisabledUsers']  = $disabledCount
+    $Script:TenantData['SyncedUsers']    = $syncedCount
+    $Script:TenantData['CloudUsers']     = $cloudCount
+
+    Write-OK "Users: $($users.Count) total ($enabledCount enabled, $disabledCount disabled, $syncedCount synced)"
+
+    if ($staleAccounts.Count -gt 0) {
+        Add-Finding -Category 'Users' -RuleId 'AZ-StaleUser' `
+            -Title "$($staleAccounts.Count) enabled user account(s) with no sign-in for 90+ days" `
+            -Risk 'Medium' `
+            -Detail "Active accounts with no sign-in for over 90 days represent unnecessary attack surface. They can be targeted by credential stuffing or phishing without anyone noticing unusual activity. Sign-in data visibility requires Azure AD P1/P2 licensing." `
+            -Remediation '1. Review each account with the manager — determine if still needed. 2. Disable accounts no longer in use via HR offboarding. 3. Implement Entra ID Lifecycle Workflows to automate stale account handling. 4. Remove licenses from stale accounts to reduce cost.' `
+            -Data ($staleAccounts | Sort-Object DaysIdle -Descending)
+    }
+
+    if ($pwdNeverExpires.Count -gt 0) {
+        Add-Finding -Category 'Users' -RuleId 'AZ-PwdNeverExpiresUser' `
+            -Title "$($pwdNeverExpires.Count) user(s) have password set to never expire" `
+            -Risk 'Low' `
+            -Detail "Passwords that never expire accumulate breach risk over time — they may appear in data breach dumps from years ago. Cloud-only accounts specifically should have password expiration unless covered by a strong MFA Conditional Access policy (per NIST SP 800-63B)." `
+            -Remediation '1. Set a domain password expiration policy. 2. As compensating control, ensure all affected accounts are covered by a MFA CA policy. 3. For service accounts, use Managed Identities instead. 4. Set PasswordValidityPeriodInDays = 365 on the domain.' `
+            -Data ($pwdNeverExpires | Select-Object -First 50)
+    }
+
+    if ($disabledLicensed.Count -gt 0) {
+        Add-Finding -Category 'Users' -RuleId 'AZ-DisabledUserLicensed' `
+            -Title "$($disabledLicensed.Count) disabled account(s) still holding active licenses" `
+            -Risk 'Medium' `
+            -Detail "Disabled accounts with active licenses waste license spend and create a re-enablement risk — if an old account is accidentally re-enabled, it immediately gets full access without any review. This commonly happens when offboarding processes are incomplete." `
+            -Remediation '1. Remove all licenses from disabled accounts immediately. 2. Implement a Lifecycle Workflow that removes licenses at account disable. 3. Review these accounts — some may be service accounts that need alternative management. 4. Consider deleting accounts older than 90 days post-disable.' `
+            -Data $disabledLicensed
+    }
+}
+
+#endregion
+
+#region ── CHECK: OAuth2 Consent Grants ───────────────────────────────────────
+
+function Invoke-CheckOAuthConsents {
+    Write-Status "Auditing OAuth2 delegated permission grants (consent phishing surface)..."
+
+    $dangerousScopes = @(
+        'Mail.ReadWrite','Mail.Read','Mail.Send',
+        'Files.ReadWrite.All','Files.Read.All',
+        'Calendars.ReadWrite','Contacts.ReadWrite',
+        'Directory.ReadWrite.All','Directory.Read.All',
+        'User.ReadWrite.All','Group.ReadWrite.All',
+        'RoleManagement.ReadWrite.Directory',
+        'MailboxSettings.ReadWrite','People.Read.All'
+    )
+
+    $grants = Get-GraphAll -Uri 'https://graph.microsoft.com/v1.0/oauth2PermissionGrants?$top=999'
+    $riskyGrants = [System.Collections.Generic.List[hashtable]]::new()
+
+    foreach ($grant in $grants) {
+        if (-not $grant.scope) { continue }
+        $grantScopes = $grant.scope -split ' '
+        $matched = @($grantScopes | Where-Object { $dangerousScopes -contains $_ })
+        if ($matched.Count -eq 0) { continue }
+
+        $spName = 'Unknown'
+        if ($grant.clientId) {
+            $sp = Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($grant.clientId)?`$select=displayName"
+            if ($sp -and $sp.displayName) { $spName = $sp.displayName }
+        }
+
+        $riskyGrants.Add(@{
+            App         = $spName
+            Scopes      = ($matched -join ', ')
+            ConsentType = $grant.consentType
+            Scope       = if ($grant.consentType -eq 'AllPrincipals') { 'Tenant-wide (ALL users)' } else { 'Per-user' }
+        }) | Out-Null
+    }
+
+    if ($riskyGrants.Count -gt 0) {
+        $tenantWide = @($riskyGrants | Where-Object { $_.ConsentType -eq 'AllPrincipals' })
+        $riskLevel  = if ($tenantWide.Count -gt 0) { 'High' } else { 'Medium' }
+
+        Add-Finding -Category 'Applications' -RuleId 'AZ-OAuthConsent' `
+            -Title "$($riskyGrants.Count) app(s) have delegated consent to sensitive Graph scopes ($($tenantWide.Count) tenant-wide)" `
+            -Risk $riskLevel `
+            -Detail "These apps were granted delegated permissions (user or admin consent) to sensitive APIs like Mail.Read, Files.ReadWrite.All, or Directory.Read.All. Tenant-wide (AllPrincipals) grants affect every user. This is the primary vector for OAuth consent phishing — attacker registers a malicious app, tricks a user/admin into consenting, and gets persistent access without credentials." `
+            -Remediation '1. Review all grants in Entra ID > Enterprise Apps > Permissions. 2. Revoke consent for apps no longer used. 3. Enable Admin Consent Workflow — users request, admins approve. 4. Set App Consent Policy to block user consent for high-privilege permissions. 5. Use Defender for Cloud Apps to monitor OAuth grant activity.' `
+            -Data ($riskyGrants | Select-Object -First 25)
+    } else {
+        Write-OK "OAuth2 consents: no high-risk delegated grants found"
+    }
+}
+
+#endregion
+
+#region ── CHECK: Registered Devices ──────────────────────────────────────────
+
+function Invoke-CheckDevices {
+    Write-Status "Checking registered device health and compliance..."
+
+    $devices = Get-GraphAll -Uri "https://graph.microsoft.com/v1.0/devices?`$select=id,displayName,accountEnabled,approximateLastSignInDateTime,isCompliant,isManaged,operatingSystem,operatingSystemVersion,trustType&`$top=999"
+
+    $now            = Get-Date
+    $staleDevices   = [System.Collections.Generic.List[hashtable]]::new()
+    $nonCompliant   = [System.Collections.Generic.List[hashtable]]::new()
+    $enabledCount   = 0
+
+    foreach ($d in $devices) {
+        if (-not $d.accountEnabled) { continue }
+        $enabledCount++
+
+        $lastSeenStr = 'Unknown'
+        $daysSince   = $null
+        if ($d.approximateLastSignInDateTime) {
+            $lastSeen    = [datetime]$d.approximateLastSignInDateTime
+            $daysSince   = [int]($now - $lastSeen).TotalDays
+            $lastSeenStr = $lastSeen.ToString('yyyy-MM-dd')
+        }
+
+        if ($daysSince -and $daysSince -gt 90) {
+            $staleDevices.Add(@{
+                Name     = "$($d.displayName)"
+                OS       = "$($d.operatingSystem) $($d.operatingSystemVersion)"
+                JoinType = "$($d.trustType)"
+                LastSeen = $lastSeenStr
+                DaysAgo  = $daysSince
+            }) | Out-Null
+        }
+
+        if ($d.isCompliant -eq $false -and $d.isManaged -eq $true) {
+            $nonCompliant.Add(@{
+                Name      = "$($d.displayName)"
+                OS        = "$($d.operatingSystem)"
+                JoinType  = "$($d.trustType)"
+                LastSeen  = $lastSeenStr
+                Compliant = 'No'
+            }) | Out-Null
+        }
+    }
+
+    $Script:TenantData['TotalDevices'] = $devices.Count
+    $Script:TenantData['StaleDevices'] = $staleDevices.Count
+    Write-OK "Devices: $($devices.Count) total, $($staleDevices.Count) stale (>90 days inactive)"
+
+    if ($staleDevices.Count -gt 0) {
+        Add-Finding -Category 'Devices' -RuleId 'AZ-StaleDevice' `
+            -Title "$($staleDevices.Count) registered device(s) not seen for over 90 days" `
+            -Risk 'Low' `
+            -Detail "Stale devices in the directory may belong to departed employees, decommissioned machines, or abandoned workstations. They persist as valid Azure AD objects and may affect Conditional Access token evaluations or be re-enrolled fraudulently." `
+            -Remediation '1. Enable auto-delete for stale devices: Entra ID > Devices > Device Settings > set cleanup rule to 90 days. 2. Use Intune Device Cleanup Rules. 3. Review and delete devices manually for departed employees. 4. Ensure device enrollment is tied to active user lifecycle.' `
+            -Data ($staleDevices | Sort-Object DaysAgo -Descending | Select-Object -First 30)
+    }
+
+    if ($nonCompliant.Count -gt 0) {
+        Add-Finding -Category 'Devices' -RuleId 'AZ-NonCompliantDevice' `
+            -Title "$($nonCompliant.Count) Intune-managed device(s) are not compliant with policy" `
+            -Risk 'Medium' `
+            -Detail "Non-compliant devices lack required security controls (BitLocker, antivirus, OS patch level, etc.). If Conditional Access requires device compliance, these users may be blocked. If it does not, non-compliant devices have unrestricted access to corporate resources." `
+            -Remediation '1. Review Intune compliance policies — ensure BitLocker, antivirus, and minimum OS version are set. 2. Create or strengthen CA policy: Require compliant device for all cloud apps. 3. Work with device owners to fix non-compliance. 4. Set grace period for remediation.' `
+            -Data ($nonCompliant | Select-Object -First 25)
+    }
+}
+
+#endregion
+
+#region ── CHECK: SSPR and Weak Reset Methods ─────────────────────────────────
+
+function Invoke-CheckSSPR {
+    Write-Status "Checking Self-Service Password Reset and weak authentication methods..."
+
+    $authMethodPolicy = Invoke-Graph -Uri 'https://graph.microsoft.com/v1.0/policies/authenticationMethodsPolicy'
+    if (-not $authMethodPolicy) {
+        Write-Warn "Could not retrieve auth methods policy"
+        return
+    }
+
+    $weakSsprMethods = @('sms','voice','email')
+    $enabledWeak = @()
+
+    foreach ($m in $authMethodPolicy.authenticationMethodConfigurations) {
+        if ($m.id -in $weakSsprMethods -and $m.state -eq 'enabled') {
+            $enabledWeak += $m.id
+        }
+    }
+
+    if ($enabledWeak.Count -gt 0) {
+        Add-Finding -Category 'AuthMethods' -RuleId 'AZ-SSPRWeakMethod' `
+            -Title "SSPR / MFA allows weak methods that are vulnerable to SIM-swap: $($enabledWeak -join ', ')" `
+            -Risk 'Medium' `
+            -Detail "SMS OTP, voice call, and alternate email are vulnerable to SIM-swapping, SS7 protocol attacks, and email account compromise. An attacker who controls a victim's phone number can use SSPR to reset their Azure AD password — gaining access to all their apps without knowing the original password." `
+            -Remediation '1. Disable SMS and voice call in Authentication Methods policy. 2. Enable Microsoft Authenticator (push notification) and FIDO2 keys as primary methods. 3. Configure SSPR to require two strong methods. 4. For high-value accounts, restrict SSPR or require helpdesk intervention.' `
+            -Data @($enabledWeak | ForEach-Object { @{ Method = $_; Risk = 'SIM-swap/Email compromise' } })
+    } else {
+        Write-OK "SSPR: no weak reset methods (SMS/voice) detected as enabled"
+    }
+}
+
+#endregion
+
+#region ── CHECK: Admin Account Security (Synced Admins) ─────────────────────
+
+function Invoke-CheckAdminAccounts {
+    Write-Status "Checking admin account security (cloud-only vs synced)..."
+
+    if (-not $Script:AllPrivMembers -or $Script:AllPrivMembers.Count -eq 0) {
+        Write-OK "No privileged members to analyze"
+        return
+    }
+
+    $syncedAdmins = [System.Collections.Generic.List[hashtable]]::new()
+
+    foreach ($member in $Script:AllPrivMembers) {
+        if ($member.Risk -notin @('Critical','High')) { continue }
+        $upn = $member.UPN
+        if (-not $upn -or $upn -notmatch '@') { continue }
+
+        $u = Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/users/${upn}?`$select=id,displayName,userPrincipalName,onPremisesSyncEnabled"
+        if ($u -and $u.onPremisesSyncEnabled -eq $true) {
+            $syncedAdmins.Add(@{
+                Name     = "$($member.User)"
+                UPN      = $upn
+                Role     = "$($member.Role)"
+                RoleRisk = "$($member.Risk)"
+                Note     = 'On-prem compromise => cloud admin compromise'
+            }) | Out-Null
+        }
+    }
+
+    if ($syncedAdmins.Count -gt 0) {
+        Add-Finding -Category 'Roles' -RuleId 'AZ-SyncedAdmin' `
+            -Title "$($syncedAdmins.Count) privileged admin(s) use on-premises synced accounts (cloud/on-prem boundary broken)" `
+            -Risk 'High' `
+            -Detail "Admin accounts synced from on-premises Active Directory collapse the cloud/on-prem security boundary. If on-prem AD is compromised (Golden Ticket, DCSync, Pass-the-Hash), the attacker automatically inherits Azure AD admin privileges. Microsoft's secure administration guidance explicitly prohibits syncing privileged accounts to the cloud." `
+            -Remediation '1. Create dedicated cloud-only accounts (e.g. admin_jsmith@tenant.onmicrosoft.com) for all Critical/High roles. 2. Remove privileged roles from synced accounts. 3. Never use .onmicrosoft.com UPN routing for synced accounts assigned to admin roles. 4. Enable PIM + MFA for all cloud admin activations.' `
+            -Data $syncedAdmins
+    } else {
+        Write-OK "Admin accounts: all privileged accounts are cloud-only (good)"
+    }
+}
+
+#endregion
+
 #region ── HTML Report ─────────────────────────────────────────────────────────
 
 function Get-RiskColor { param([string]$r)
@@ -998,6 +1331,7 @@ function New-HTMLReport { param([string]$Out)
     $elapsed = [Math]::Round((New-TimeSpan -Start $StartTime -End (Get-Date)).TotalSeconds)
 
     $findingRowsHtml = Build-FindingRows
+    $userInventoryHtml = Build-DataTable -Items $Script:UserInventory -Max 300
     $failedHtml = ''
     if($Script:FailedModules.Count -gt 0){
         $frows = ($Script:FailedModules | ForEach-Object {"<tr><td><code>$($_.Name)</code></td><td style='color:#dc3545'>$(HE $_.Error)</td><td>$($_.Line)</td></tr>"}) -join ''
@@ -1153,6 +1487,8 @@ a{color:#0078d4;text-decoration:none}a:hover{text-decoration:underline}
   <div class="stat-item"><span class="stat-num saz">$($t['GuestCount'])</span><span class="stat-lbl">Guests</span></div>
   <div class="stat-item"><span class="stat-num saz">$($t['CACount'])</span><span class="stat-lbl">CA Policies</span></div>
   <div class="stat-item"><span class="stat-num saz">$(($Script:GlobalAdmins).Count)</span><span class="stat-lbl">Global Admins</span></div>
+  <div class="stat-item"><span class="stat-num saz">$($t['TotalUsers'])</span><span class="stat-lbl">Users</span></div>
+  <div class="stat-item"><span class="stat-num saz">$($t['TotalDevices'])</span><span class="stat-lbl">Devices</span></div>
 </div>
 
 <div class="toolbar">
@@ -1193,6 +1529,38 @@ a{color:#0078d4;text-decoration:none}a:hover{text-decoration:underline}
         <div class="info-row"><span class="info-key">P2 License (PIM / IDP)</span><span class="info-val $(if($t['HasAADP2']){'ok'}else{'warn'})">$(if($t['HasAADP2']){'Yes'}else{'No'})</span></div>
         <div class="info-row"><span class="info-key">Global Administrators</span><span class="info-val $(if(($Script:GlobalAdmins).Count -gt 5){'bad'}else{'ok'})">$(($Script:GlobalAdmins).Count)</span></div>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h2 class="section-h" onclick="toggleSection(this)">User Inventory ($($Script:UserInventory.Count) members) <span class="toggle-icon">&#9660;</span></h2>
+  <div class="section-body">
+    <div class="info-grid" style="grid-template-columns:repeat(5,1fr)">
+      <div class="info-col" style="border-right:1px solid var(--border)">
+        <div class="info-row"><span class="info-key">Total Users</span><span class="info-val">$($t['TotalUsers'])</span></div>
+        <div class="info-row"><span class="info-key">Enabled</span><span class="info-val ok">$($t['EnabledUsers'])</span></div>
+      </div>
+      <div class="info-col" style="border-right:1px solid var(--border)">
+        <div class="info-row"><span class="info-key">Disabled</span><span class="info-val warn">$($t['DisabledUsers'])</span></div>
+        <div class="info-row"><span class="info-key">Guests</span><span class="info-val">$($t['GuestCount'])</span></div>
+      </div>
+      <div class="info-col" style="border-right:1px solid var(--border)">
+        <div class="info-row"><span class="info-key">Synced (on-prem)</span><span class="info-val">$($t['SyncedUsers'])</span></div>
+        <div class="info-row"><span class="info-key">Cloud-only</span><span class="info-val">$($t['CloudUsers'])</span></div>
+      </div>
+      <div class="info-col" style="border-right:1px solid var(--border)">
+        <div class="info-row"><span class="info-key">Devices</span><span class="info-val">$($t['TotalDevices'])</span></div>
+        <div class="info-row"><span class="info-key">Stale Devices</span><span class="info-val $(if(($t['StaleDevices']) -gt 0){'warn'}else{'ok'})">$($t['StaleDevices'])</span></div>
+      </div>
+      <div class="info-col">
+        <div class="info-row"><span class="info-key">Global Admins</span><span class="info-val $(if(($Script:GlobalAdmins).Count -gt 5){'bad'}elseif(($Script:GlobalAdmins).Count -eq 0){'bad'}else{'ok'})">$(($Script:GlobalAdmins).Count)</span></div>
+        <div class="info-row"><span class="info-key">CA Policies</span><span class="info-val $(if(($t['CACount']) -gt 0){'ok'}else{'bad'})">$($t['CACount'])</span></div>
+      </div>
+    </div>
+    <div style="padding:0 20px 16px">
+      <p class="note" style="margin-bottom:8px">Full user list — showing up to 300 members (guests excluded). Columns: Enabled, Source (Cloud/Synced), Last Sign-In, Password Expiry, Licensed, Issues detected.</p>
+      $userInventoryHtml
     </div>
   </div>
 </div>
@@ -1314,6 +1682,11 @@ $checks = @(
     @{ Name='PIM';                Fn={ Invoke-CheckPIM } }
     @{ Name='RiskyUsers';         Fn={ Invoke-CheckRiskyUsers } }
     @{ Name='Domains';            Fn={ Invoke-CheckDomains } }
+    @{ Name='UserInventory';      Fn={ Invoke-CheckUserInventory } }
+    @{ Name='OAuthConsents';      Fn={ Invoke-CheckOAuthConsents } }
+    @{ Name='Devices';            Fn={ Invoke-CheckDevices } }
+    @{ Name='SSPR';               Fn={ Invoke-CheckSSPR } }
+    @{ Name='AdminAccounts';      Fn={ Invoke-CheckAdminAccounts } }
 )
 
 foreach ($check in $checks) {
