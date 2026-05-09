@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AD-Recon — CORP.LOCAL</title>
+<style>
+:root{
+  --c:#dc3545;--h:#fd7e14;--m:#e6a817;--l:#20c997;--i:#6c757d;
+  --bg:#f4f6fb;--card:#fff;--border:#e0e4ed;--text:#1a1d23;--sub:#5a6375;
+  --hdr1:#0f2444;--hdr2:#1a3a6b;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,Arial,sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+a{color:#1a6bbf;text-decoration:none}a:hover{text-decoration:underline}
+.hdr{background:linear-gradient(135deg,var(--hdr1),var(--hdr2));color:#fff;padding:28px 40px 24px;display:flex;align-items:center;gap:36px;flex-wrap:wrap}
+.hdr-text h1{font-size:1.7rem;font-weight:800;letter-spacing:-.3px}
+.hdr-text p{opacity:.75;margin-top:6px;font-size:.88rem}
+.hdr-meta{display:flex;gap:20px;margin-top:10px;flex-wrap:wrap}
+.hdr-meta span{font-size:.8rem;opacity:.8}
+.hdr-meta b{opacity:1}
+.score-ring{flex-shrink:0;text-align:center}
+.score-num{font-size:1.6rem;font-weight:900}
+.stats-bar{background:#fff;border-bottom:1px solid var(--border);padding:0 40px;display:flex;flex-wrap:wrap}
+.stat-item{padding:16px 24px;display:flex;flex-direction:column;align-items:center;border-right:1px solid var(--border);cursor:pointer;transition:background .15s;min-width:100px}
+.stat-item:hover{background:#f8f9fc}
+.stat-num{font-size:1.6rem;font-weight:800;line-height:1}
+.stat-lbl{font-size:.72rem;color:var(--sub);margin-top:3px;text-transform:uppercase;letter-spacing:.4px}
+.sc{color:var(--c)}.sh{color:var(--h)}.sm{color:var(--m)}.sl{color:var(--l)}.si{color:var(--i)}
+.toolbar{background:#fff;border-bottom:1px solid var(--border);padding:10px 40px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:50;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.search-box{flex:1;min-width:200px;max-width:380px;position:relative}
+.search-box input{width:100%;padding:7px 12px 7px 34px;border:1px solid var(--border);border-radius:6px;font-size:.87rem;outline:none}
+.search-box input:focus{border-color:#1a6bbf;box-shadow:0 0 0 3px rgba(26,107,191,.1)}
+.search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--sub)}
+.filter-btns{display:flex;gap:6px;flex-wrap:wrap}
+.fbtn{padding:5px 14px;border-radius:20px;border:1.5px solid var(--border);background:#fff;font-size:.78rem;font-weight:600;cursor:pointer;transition:all .15s}
+.fbtn:hover{border-color:#1a6bbf;color:#1a6bbf}
+.fbtn.active{border-color:currentColor;color:#fff}
+.fbtn-all.active{background:#1a6bbf;border-color:#1a6bbf}
+.fbtn-critical.active{background:var(--c);border-color:var(--c)}
+.fbtn-high.active{background:var(--h);border-color:var(--h)}
+.fbtn-medium.active{background:var(--m);border-color:var(--m)}
+.fbtn-low.active{background:var(--l);border-color:var(--l)}
+.fbtn-info.active{background:var(--i);border-color:var(--i)}
+.toolbar-right{margin-left:auto;display:flex;gap:8px}
+.btn{padding:6px 14px;border-radius:6px;border:1.5px solid var(--border);background:#fff;font-size:.8rem;cursor:pointer;font-weight:600;transition:all .15s;display:flex;align-items:center;gap:5px}
+.btn:hover{border-color:#1a6bbf;color:#1a6bbf}
+.btn-primary{background:#1a6bbf;border-color:#1a6bbf;color:#fff}
+.btn-primary:hover{background:#155ba0}
+.container{max-width:1400px;margin:0 auto;padding:24px 40px}
+.section{background:var(--card);border:1px solid var(--border);border-radius:10px;margin-bottom:20px;overflow:hidden}
+.section-h{font-size:1rem;font-weight:700;padding:14px 20px;border-bottom:1px solid var(--border);background:#f8f9fc;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.section-h .toggle-icon{margin-left:auto;color:var(--sub);font-size:.8rem;transition:transform .2s}
+.warn-h{background:#fff8f0;color:#b35c00;border-bottom-color:#fde5c8}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.info-col{padding:16px 20px}
+.info-col:first-child{border-right:1px solid var(--border)}
+.info-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed var(--border);font-size:.87rem}
+.info-row:last-child{border-bottom:none}
+.info-key{color:var(--sub)}
+.info-val{font-weight:600;text-align:right}
+.info-val.bad{color:var(--c)}.info-val.warn{color:var(--h)}.info-val.ok{color:#28a745}
+.info-tbl{width:100%;border-collapse:collapse;font-size:.87rem}
+.info-tbl th{background:#f8f9fc;padding:9px 14px;text-align:left;font-weight:600;border-bottom:2px solid var(--border);font-size:.8rem;text-transform:uppercase;letter-spacing:.3px;color:var(--sub)}
+.info-tbl td{padding:9px 14px;border-bottom:1px solid #f0f2f8}
+.info-tbl tr:last-child td{border-bottom:none}
+.info-tbl tr:hover td{background:#f8f9fc}
+.no-data{padding:20px;color:var(--sub);font-style:italic;text-align:center}
+.pill{display:inline-block;padding:2px 10px;border-radius:12px;font-size:.72rem;font-weight:700;letter-spacing:.2px}
+.pill.ok{background:#d4edda;color:#155724}.pill.bad{background:#f8d7da;color:#721c24}.pill.warn{background:#fff3cd;color:#856404}
+.bar-wrap{background:#e9ecef;border-radius:4px;height:8px;overflow:hidden}
+.bar{background:#1a6bbf;height:100%;border-radius:4px}
+.findings-toolbar{padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;background:#f8f9fc}
+.findings-count{font-size:.82rem;color:var(--sub)}
+.findings-list{padding:0}
+.finding-card{border-bottom:1px solid var(--border)}
+.finding-card:last-child{border-bottom:none}
+.finding-card[data-risk="critical"] .finding-hdr{border-left:4px solid var(--c)}
+.finding-card[data-risk="high"]     .finding-hdr{border-left:4px solid var(--h)}
+.finding-card[data-risk="medium"]   .finding-hdr{border-left:4px solid var(--m)}
+.finding-card[data-risk="low"]      .finding-hdr{border-left:4px solid var(--l)}
+.finding-card[data-risk="info"]     .finding-hdr{border-left:4px solid var(--i)}
+.finding-hdr{display:flex;align-items:center;gap:10px;padding:12px 20px;cursor:pointer;transition:background .12s;flex-wrap:wrap}
+.finding-hdr:hover{background:#f4f6fb}
+.chevron{color:var(--sub);font-size:.75rem;transition:transform .18s;flex-shrink:0}
+.chevron.open{transform:rotate(90deg)}
+.risk-pill{display:inline-block;padding:3px 11px;border-radius:20px;font-size:.72rem;font-weight:700;color:#fff;white-space:nowrap;flex-shrink:0}
+.rule-id{font-family:'Cascadia Code','Consolas',monospace;font-size:.78rem;color:var(--sub);background:#f0f2f8;padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0}
+.finding-title{font-weight:600;font-size:.92rem;flex:1;min-width:200px}
+.finding-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto;flex-shrink:0}
+.cat-tag{padding:2px 9px;border-radius:10px;background:#eef1fb;color:#3a4a7a;font-size:.72rem;font-weight:600}
+.data-count{padding:2px 9px;border-radius:10px;background:#fff3cd;color:#856404;font-size:.72rem;font-weight:700;white-space:nowrap}
+.ttp-link{padding:2px 8px;border-radius:4px;background:#e8f0fe;color:#1a6bbf;font-size:.72rem;font-weight:700;border:1px solid #c5d8f7;white-space:nowrap}
+.ttp-none{color:#bbb;font-size:.8rem}
+.finding-body{padding:0 20px 18px 52px;background:#fafbfd}
+.finding-desc{color:#3a4050;font-size:.87rem;line-height:1.65;margin-bottom:14px;padding-top:12px;border-top:1px dashed var(--border)}
+.affected-wrap{margin-bottom:14px}
+.affected-lbl{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--sub);margin-bottom:6px}
+.data-tbl-wrap{overflow-x:auto;border-radius:6px;border:1px solid var(--border)}
+.data-tbl{width:100%;border-collapse:collapse;font-size:.82rem}
+.data-tbl th{background:#f0f2f8;padding:7px 12px;text-align:left;font-weight:600;color:var(--sub);border-bottom:1px solid var(--border);font-size:.75rem;text-transform:uppercase;letter-spacing:.3px}
+.data-tbl td{padding:7px 12px;border-bottom:1px solid #f0f2f8;font-family:'Cascadia Code','Consolas',monospace;font-size:.8rem}
+.data-tbl tr:last-child td{border-bottom:none}
+.data-tbl tr:hover td{background:#f4f6fb}
+.more-row td{color:var(--sub);font-style:italic;text-align:center;padding:6px;font-family:inherit}
+.remed-wrap{background:#f0fff4;border:1px solid #c3e6cb;border-radius:6px;padding:12px 16px}
+.remed-lbl{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#155724;margin-bottom:8px}
+.remed-list{padding-left:18px;color:#1e5631;font-size:.85rem;line-height:1.7}
+.remed-list li{margin-bottom:4px}
+.no-results{padding:40px;text-align:center;color:var(--sub);display:none}
+.footer{text-align:center;padding:24px;font-size:.8rem;color:var(--sub);border-top:1px solid var(--border);background:#fff;margin-top:8px}
+.footer strong{color:var(--text)}
+@media(max-width:768px){
+  .hdr,.toolbar,.container{padding-left:16px;padding-right:16px}
+  .stats-bar{padding:0 8px}
+  .stat-item{padding:12px 14px;min-width:80px}
+  .info-grid{grid-template-columns:1fr}
+  .info-col:first-child{border-right:none;border-bottom:1px solid var(--border)}
+  .finding-body{padding-left:16px}
+}
+@media print{.toolbar,.btn{display:none}.finding-body{display:block !important}}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="score-ring">
+    <svg width="100" height="100" viewBox="0 0 120 120">
+      <circle cx="60" cy="60" r="54" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="10"/>
+      <circle cx="60" cy="60" r="54" fill="none" stroke="#dc3545" stroke-width="10"
+              stroke-dasharray="142.5 196.8" stroke-linecap="round"
+              transform="rotate(-90 60 60)"/>
+      <text x="60" y="56" text-anchor="middle" dominant-baseline="middle"
+            font-size="26" font-weight="900" fill="#dc3545">42</text>
+      <text x="60" y="74" text-anchor="middle" font-size="10" fill="rgba(255,255,255,.55)" letter-spacing="1">/ 100</text>
+    </svg>
+  </div>
+  <div class="hdr-text">
+    <h1>AD Security Audit — CORP.LOCAL</h1>
+    <p>Active Directory security assessment report</p>
+    <div class="hdr-meta">
+      <span><b>DC:</b> DC01.CORP.LOCAL</span>
+      <span><b>Generated:</b> 2026-05-09 14:32</span>
+      <span><b>Duration:</b> 47s</span>
+      <span><b>Functional Level:</b> Windows 2008 R2</span>
+    </div>
+  </div>
+</div>
+
+<div class="stats-bar">
+  <div class="stat-item" onclick="setFilter('critical')"><span class="stat-num sc">3</span><span class="stat-lbl">Critical</span></div>
+  <div class="stat-item" onclick="setFilter('high')"><span class="stat-num sh">7</span><span class="stat-lbl">High</span></div>
+  <div class="stat-item" onclick="setFilter('medium')"><span class="stat-num sm">9</span><span class="stat-lbl">Medium</span></div>
+  <div class="stat-item" onclick="setFilter('low')"><span class="stat-num sl">3</span><span class="stat-lbl">Low</span></div>
+  <div class="stat-item" onclick="setFilter('info')"><span class="stat-num si">2</span><span class="stat-lbl">Info</span></div>
+  <div class="stat-item"><span class="stat-num">847</span><span class="stat-lbl">Users</span></div>
+  <div class="stat-item"><span class="stat-num">312</span><span class="stat-lbl">Computers</span></div>
+  <div class="stat-item"><span class="stat-num">1</span><span class="stat-lbl">DCs</span></div>
+  <div class="stat-item"><span class="stat-num">2</span><span class="stat-lbl">Trusts</span></div>
+</div>
+
+<div class="toolbar" id="main-toolbar">
+  <div class="search-box">
+    <span class="search-icon">&#128269;</span>
+    <input type="text" id="searchInput" placeholder="Search findings, rule IDs, usernames..." oninput="applyFilters()">
+  </div>
+  <div class="filter-btns">
+    <button class="fbtn fbtn-all active" onclick="setFilter('all')">All (24)</button>
+    <button class="fbtn fbtn-critical" onclick="setFilter('critical')">Critical (3)</button>
+    <button class="fbtn fbtn-high" onclick="setFilter('high')">High (7)</button>
+    <button class="fbtn fbtn-medium" onclick="setFilter('medium')">Medium (9)</button>
+    <button class="fbtn fbtn-low" onclick="setFilter('low')">Low (3)</button>
+    <button class="fbtn fbtn-info" onclick="setFilter('info')">Info (2)</button>
+  </div>
+  <div class="toolbar-right">
+    <button class="btn" onclick="expandAll()">&#8597; Expand All</button>
+    <button class="btn" onclick="collapseAll()">&#8597; Collapse All</button>
+    <button class="btn btn-primary" onclick="exportCSV()">&#8677; Export CSV</button>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- Domain Info -->
+<div class="section">
+  <h2 class="section-h" onclick="toggleSection(this)">Domain Information <span class="toggle-icon">&#9660;</span></h2>
+  <div class="section-body">
+    <div class="info-grid">
+      <div class="info-col">
+        <div class="info-row"><span class="info-key">Domain FQDN</span><span class="info-val">CORP.LOCAL</span></div>
+        <div class="info-row"><span class="info-key">Functional Level</span><span class="info-val warn">Windows 2008 R2</span></div>
+        <div class="info-row"><span class="info-key">Schema Version</span><span class="info-val">87 (Exchange 2019)</span></div>
+        <div class="info-row"><span class="info-key">Recycle Bin</span><span class="info-val bad">Disabled</span></div>
+        <div class="info-row"><span class="info-key">krbtgt Password Age</span><span class="info-val bad">847 days</span></div>
+        <div class="info-row"><span class="info-key">Machine Account Quota</span><span class="info-val warn">10</span></div>
+      </div>
+      <div class="info-col">
+        <div class="info-row"><span class="info-key">Min Password Length</span><span class="info-val bad">7 chars</span></div>
+        <div class="info-row"><span class="info-key">Password Complexity</span><span class="info-val ok">True</span></div>
+        <div class="info-row"><span class="info-key">Password History</span><span class="info-val">10 remembered</span></div>
+        <div class="info-row"><span class="info-key">Lockout Threshold</span><span class="info-val bad">None (unlimited)</span></div>
+        <div class="info-row"><span class="info-key">Protected Users Group</span><span class="info-val">0</span></div>
+        <div class="info-row"><span class="info-key">Users with SID History</span><span class="info-val warn">3</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Domain Controllers -->
+<div class="section">
+  <h2 class="section-h" onclick="toggleSection(this)">Domain Controllers (1) <span class="toggle-icon">&#9660;</span></h2>
+  <div class="section-body">
+    <table class="info-tbl">
+      <thead><tr><th>Name</th><th>OS</th><th>Last Logon</th><th>Distinguished Name</th></tr></thead>
+      <tbody>
+        <tr><td><strong>DC01</strong></td><td>Windows Server 2019 Standard</td><td>2026-05-09</td><td>CN=DC01,OU=Domain Controllers,DC=corp,DC=local</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Trusts -->
+<div class="section">
+  <h2 class="section-h" onclick="toggleSection(this)">Domain Trusts (2) <span class="toggle-icon">&#9660;</span></h2>
+  <div class="section-body">
+    <table class="info-tbl">
+      <thead><tr><th>Partner Domain</th><th>Type</th><th>Direction</th><th>SID Filtering</th></tr></thead>
+      <tbody>
+        <tr><td><strong>LEGACY.CORP</strong></td><td>External</td><td>Bidirectional</td><td><span class="pill bad">Disabled</span></td></tr>
+        <tr><td><strong>PARTNER.LOCAL</strong></td><td>Forest</td><td>Inbound</td><td><span class="pill ok">Enabled</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- OS Inventory -->
+<div class="section">
+  <h2 class="section-h" onclick="toggleSection(this)">Computer OS Inventory (312 total) <span class="toggle-icon">&#9660;</span></h2>
+  <div class="section-body">
+    <table class="info-tbl">
+      <thead><tr><th>Operating System</th><th>Count</th><th style="width:40%">Distribution</th></tr></thead>
+      <tbody>
+        <tr><td>Windows 10 Pro</td><td>198</td><td><div class="bar-wrap"><div class="bar" style="width:63%"></div></div></td></tr>
+        <tr><td>Windows 11 Enterprise</td><td>72</td><td><div class="bar-wrap"><div class="bar" style="width:23%"></div></div></td></tr>
+        <tr><td>Windows Server 2019</td><td>18</td><td><div class="bar-wrap"><div class="bar" style="width:6%"></div></div></td></tr>
+        <tr><td>Windows Server 2016</td><td>11</td><td><div class="bar-wrap"><div class="bar" style="width:4%"></div></div></td></tr>
+        <tr><td style="color:#dc3545;font-weight:600">Windows 7 &#9888;</td><td>11</td><td><div class="bar-wrap"><div class="bar" style="width:3%;background:#dc3545"></div></div></td></tr>
+        <tr><td style="color:#dc3545;font-weight:600">Windows Server 2008 R2 &#9888;</td><td>2</td><td><div class="bar-wrap"><div class="bar" style="width:1%;background:#dc3545"></div></div></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Security Findings -->
+<div class="section" id="findings-section">
+  <h2 class="section-h" style="cursor:default">
+    Security Findings
+    <span id="findings-visible-count" style="font-weight:400;color:var(--sub);font-size:.85rem;margin-left:6px"></span>
+  </h2>
+  <div class="findings-toolbar">
+    <span class="findings-count" id="results-label">Showing 24 findings — click any row to expand details</span>
+  </div>
+  <div class="findings-list" id="findings-list">
+
+<!-- F1: CRITICAL DCSync -->
+<div class="finding-card" data-risk="critical" data-category="Security" data-id="f1">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#dc3545">Critical</span>
+    <span class="rule-id">S-DCSync</span>
+    <span class="finding-title">DCSync rights granted to non-DC account</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Security</span>
+      <span class="data-count">1 affected</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1003/006/" target="_blank">T1003.006</a>
+    </span>
+  </div>
+  <div class="finding-body" id="fb1" style="display:none">
+    <div class="finding-desc">svc_backup holds "Replicating Directory Changes All" on the domain root. Any compromise of this account enables a full DCSync attack — dumping all NTLM hashes and Kerberos keys from the domain without touching a DC.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">Affected Objects (1)</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>Account</th><th>Permission</th><th>Object</th><th>Inherited</th></tr></thead>
+        <tbody>
+          <tr><td>CORP\svc_backup</td><td>Replicating Directory Changes All</td><td>DC=corp,DC=local</td><td>False</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Open Active Directory Users and Computers → View → Advanced Features</li>
+        <li>Right-click the domain root → Properties → Security → Advanced</li>
+        <li>Remove "Replicating Directory Changes All" and "Replicating Directory Changes" from svc_backup</li>
+        <li>Rotate the svc_backup credential immediately — assume it has been used for DCSync</li>
+        <li>Review event logs for ID 4662 with GUID {1131f6aa-...} from non-DC sources</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- F2: CRITICAL AS-REP Roasting -->
+<div class="finding-card" data-risk="critical" data-category="Accounts" data-id="f2">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#dc3545">Critical</span>
+    <span class="rule-id">P-ASREPRoast</span>
+    <span class="finding-title">AS-REP Roasting — accounts without Kerberos pre-authentication (4 accounts)</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Accounts</span>
+      <span class="data-count">4 affected</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1558/004/" target="_blank">T1558.004</a>
+    </span>
+  </div>
+  <div class="finding-body" id="fb2" style="display:none">
+    <div class="finding-desc">These accounts have "Do not require Kerberos preauthentication" set (userAccountControl bit 0x400000). An unauthenticated attacker can request AS-REP tickets for these accounts and crack the hash offline — no credentials required. A weak password can be cracked in minutes with hashcat.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">Affected Accounts (4)</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>Username</th><th>Display Name</th><th>Last Logon</th><th>Password Age (days)</th><th>Enabled</th></tr></thead>
+        <tbody>
+          <tr><td>jsmith</td><td>John Smith</td><td>2026-05-02</td><td>312</td><td>True</td></tr>
+          <tr><td>svc_legacy</td><td>Legacy Service Account</td><td>2025-11-14</td><td>847</td><td>True</td></tr>
+          <tr><td>testuser01</td><td>Test User 01</td><td>Never</td><td>1204</td><td>True</td></tr>
+          <tr><td>shared_mailbox</td><td>Shared Mailbox</td><td>2026-04-01</td><td>180</td><td>True</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>For each account: ADUC → Account tab → uncheck "Do not require Kerberos preauthentication"</li>
+        <li>Or via PowerShell: <code>Set-ADUser jsmith -DoesNotRequirePreAuth $false</code></li>
+        <li>If a legacy app requires it: rotate password to 25+ char random string and monitor for roasting</li>
+        <li>Enable AES encryption for Kerberos on these accounts</li>
+        <li>Rotate credentials for all 4 accounts immediately — assume they have been attempted</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- F3: CRITICAL ADCS ESC1 -->
+<div class="finding-card" data-risk="critical" data-category="Security" data-id="f3">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#dc3545">Critical</span>
+    <span class="rule-id">S-ESC1</span>
+    <span class="finding-title">ADCS ESC1 — certificate template allows arbitrary Subject Alternative Name</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Security</span>
+      <span class="data-count">1 affected</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1649/" target="_blank">T1649</a>
+    </span>
+  </div>
+  <div class="finding-body" id="fb3" style="display:none">
+    <div class="finding-desc">Template "UserTemplate-V2" on CA "CORP-CA" allows client-supplied Subject Alternative Names and grants enrollment to "Domain Users". Any authenticated user can request a certificate for Domain Admin and use it for PKINIT authentication — gaining a full TGT as DA without knowing their password.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">Vulnerable Templates (1)</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>Template Name</th><th>CA</th><th>Enrollment Rights</th><th>CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT</th></tr></thead>
+        <tbody>
+          <tr><td>UserTemplate-V2</td><td>CORP-CA</td><td>Domain Users</td><td>True (VULNERABLE)</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Open Certificate Authority MMC → Certificate Templates → right-click UserTemplate-V2 → Properties</li>
+        <li>Subject Name tab: change to "Build from this Active Directory information" (uncheck "Supply in the request")</li>
+        <li>Alternatively enable Manager Approval: Issuance Requirements → require CA certificate manager approval</li>
+        <li>Restrict enrollment to a specific security group instead of Domain Users</li>
+        <li>Run Certify.exe or PSPKIAudit to confirm no other ESC1 templates exist</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- F4: HIGH Kerberoasting -->
+<div class="finding-card" data-risk="high" data-category="Accounts" data-id="f4">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#fd7e14">High</span>
+    <span class="rule-id">P-Kerberoast</span>
+    <span class="finding-title">Kerberoastable service accounts — 6 user accounts with SPNs</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Accounts</span>
+      <span class="data-count">6 affected</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1558/003/" target="_blank">T1558.003</a>
+    </span>
+  </div>
+  <div class="finding-body" id="fb4" style="display:none">
+    <div class="finding-desc">These user accounts have SPNs registered. Any authenticated domain user can request TGS tickets for these accounts and crack them offline. Accounts with weak passwords are trivially compromised — especially dangerous when using RC4 encryption which cracks faster than AES.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">Kerberoastable Accounts (6)</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>Username</th><th>SPN</th><th>Password Age (days)</th><th>Encryption</th><th>Admin Count</th></tr></thead>
+        <tbody>
+          <tr><td>svc_sql</td><td>MSSQLSvc/sqlserver.corp.local:1433</td><td>412</td><td>RC4 (weak)</td><td>1</td></tr>
+          <tr><td>svc_iis</td><td>HTTP/webapp.corp.local</td><td>623</td><td>RC4 (weak)</td><td>0</td></tr>
+          <tr><td>svc_backup</td><td>BackupExec/backupserver.corp.local</td><td>91</td><td>AES256</td><td>0</td></tr>
+          <tr><td>svc_exchange</td><td>exchangeMDB/exch01.corp.local</td><td>1204</td><td>RC4 (weak)</td><td>1</td></tr>
+          <tr><td>svc_scanner</td><td>HTTP/scanner.corp.local</td><td>847</td><td>RC4 (weak)</td><td>0</td></tr>
+          <tr><td>svc_deploy</td><td>MSDeployAgentService/deploy.corp.local</td><td>291</td><td>AES256</td><td>0</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Migrate service accounts to Group Managed Service Accounts (gMSA) — passwords auto-rotate</li>
+        <li>For accounts that cannot be converted: set 25+ character random passwords and rotate quarterly</li>
+        <li>Enable AES-256 Kerberos: Set-ADUser svc_sql -KerberosEncryptionType AES256</li>
+        <li>Move high-privilege service accounts (adminCount=1) out of privileged groups or use dedicated accounts</li>
+        <li>Add all service accounts to the Protected Users security group where feasible</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- F5: HIGH Krbtgt -->
+<div class="finding-card" data-risk="high" data-category="Accounts" data-id="f5">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#fd7e14">High</span>
+    <span class="rule-id">P-Krbtgt</span>
+    <span class="finding-title">krbtgt password not rotated in 847 days</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Accounts</span>
+      <span class="data-count">1 affected</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1558/001/" target="_blank">T1558.001</a>
+    </span>
+  </div>
+  <div class="finding-body" id="fb5" style="display:none">
+    <div class="finding-desc">The krbtgt account password has not been changed in 847 days (last changed: 2023-11-14). If an attacker obtained the krbtgt hash at any point since then, they can forge Golden Tickets valid for any user, any service, indefinitely — including bypassing MFA and Smart Card requirements. Golden Tickets forged with an old key remain valid until the key is changed TWICE.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">Account Details</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>Account</th><th>Last Password Change</th><th>Age (days)</th><th>Last Logon</th></tr></thead>
+        <tbody>
+          <tr><td>krbtgt</td><td>2023-11-14</td><td>847</td><td>N/A (system account)</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Download Microsoft's New-KrbtgtKeys.ps1 from the Microsoft GitHub</li>
+        <li>Run in simulation mode first: .\New-KrbtgtKeys.ps1 -Mode Mode2</li>
+        <li>Change krbtgt password (first rotation): run with -Mode Mode3</li>
+        <li>Wait for AD replication to complete across all DCs (check with repadmin /showrepl)</li>
+        <li>Rotate krbtgt password again (second rotation) after 10+ hours</li>
+        <li>Schedule quarterly rotations going forward</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- F6: HIGH GPP Passwords -->
+<div class="finding-card" data-risk="high" data-category="Security" data-id="f6">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#fd7e14">High</span>
+    <span class="rule-id">S-GPPPassword</span>
+    <span class="finding-title">GPP Passwords (MS14-025) — cPassword found in SYSVOL (2 files)</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Security</span>
+      <span class="data-count">2 affected</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1552/006/" target="_blank">T1552.006</a>
+    </span>
+  </div>
+  <div class="finding-body" id="fb6" style="display:none">
+    <div class="finding-desc">Group Policy Preferences XML files in SYSVOL contain cPassword values. Microsoft published the AES decryption key (KB2962486) — any domain user can decrypt these to recover plaintext credentials. This is exploited by Metasploit's post/windows/gather/credentials/gpp, PowerSploit's Get-GPPPassword, and CrackMapExec automatically.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">Affected Files (2)</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>File Path (relative to SYSVOL)</th><th>Username</th><th>cPassword (first 24 chars)</th></tr></thead>
+        <tbody>
+          <tr><td>\corp.local\Policies\{8A3F2C1B-...}\Machine\Preferences\Groups\Groups.xml</td><td>LocalAdmin</td><td>AzVJmXh9wKpLmN3...</td></tr>
+          <tr><td>\corp.local\Policies\{F2A91B8C-...}\User\Preferences\Drives\Drives.xml</td><td>svc_filemap</td><td>BqTnRs7vYcMwOp2...</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Immediately rotate all credentials referenced in these files (LocalAdmin, svc_filemap)</li>
+        <li>Delete the cPassword elements from the XML files (or delete the entire GPP preference)</li>
+        <li>Run: findstr /S /I cpassword \\%LOGONSERVER%\sysvol\%USERDNSDOMAIN%\policies\*.xml to find all occurrences</li>
+        <li>Replace local admin password management with LAPS or Windows LAPS</li>
+        <li>Replace mapped drive credentials with DFS or service account without SYSVOL-stored password</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- F7: HIGH Unconstrained Delegation -->
+<div class="finding-card" data-risk="high" data-category="Accounts" data-id="f7">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#fd7e14">High</span>
+    <span class="rule-id">P-UnconstrainedDelegation</span>
+    <span class="finding-title">Unconstrained Kerberos delegation — 3 non-DC computer accounts</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Accounts</span>
+      <span class="data-count">3 affected</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1134/001/" target="_blank">T1134.001</a>
+    </span>
+  </div>
+  <div class="finding-body" id="fb7" style="display:none">
+    <div class="finding-desc">These machines have "Trust this computer for delegation to any service (Kerberos only)" enabled. When a privileged user (including Domain Admins) authenticates to any service on these machines, their TGT is cached in memory. A local administrator on any of these machines can extract these TGTs with Mimikatz and impersonate the victim. Combined with SpoolSample / PrinterBug, an attacker can coerce DC authentication to these machines.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">Affected Computers (3)</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>Computer</th><th>OS</th><th>Last Logon</th><th>Password Age (days)</th><th>OU</th></tr></thead>
+        <tbody>
+          <tr><td>FILESERVER01$</td><td>Windows Server 2016</td><td>2026-05-09</td><td>23</td><td>OU=Servers,DC=corp,DC=local</td></tr>
+          <tr><td>LEGACYAPP02$</td><td>Windows Server 2012 R2</td><td>2026-05-08</td><td>412</td><td>OU=Legacy,DC=corp,DC=local</td></tr>
+          <tr><td>PRINTSERVER03$</td><td>Windows Server 2019</td><td>2026-05-09</td><td>67</td><td>OU=Servers,DC=corp,DC=local</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Determine if any service on these machines actually requires delegation</li>
+        <li>Replace unconstrained delegation with constrained delegation targeting specific SPNs only</li>
+        <li>Mark all Tier 0 accounts as "Account is sensitive and cannot be delegated"</li>
+        <li>Add Domain Admins and privileged accounts to the Protected Users security group</li>
+        <li>If SpoolSample/PrinterBug is a concern, disable the Print Spooler service on DCs</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- F8: MEDIUM LAPS not deployed -->
+<div class="finding-card" data-risk="medium" data-category="Accounts" data-id="f8">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#e6a817">Medium</span>
+    <span class="rule-id">P-LAPSNotInstalled</span>
+    <span class="finding-title">LAPS not deployed — 187 workstations without ms-Mcs-AdmPwd attribute</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Accounts</span>
+      <span class="data-count">187 affected</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1078/002/" target="_blank">T1078.002</a>
+    </span>
+  </div>
+  <div class="finding-body" id="fb8" style="display:none">
+    <div class="finding-desc">187 workstations do not have LAPS deployed (ms-Mcs-AdmPwdExpirationTime is absent). Without LAPS the local Administrator password is likely the same across multiple machines — compromising one gives access to many. This is the primary driver of lateral movement in most enterprise breaches.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">Sample of Affected Workstations (showing first 5 of 187)</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>Computer Name</th><th>OS</th><th>OU</th><th>Last Logon</th></tr></thead>
+        <tbody>
+          <tr><td>WS-HR-001</td><td>Windows 10 Pro</td><td>OU=HR,OU=Workstations</td><td>2026-05-09</td></tr>
+          <tr><td>WS-HR-002</td><td>Windows 10 Pro</td><td>OU=HR,OU=Workstations</td><td>2026-05-08</td></tr>
+          <tr><td>WS-FIN-015</td><td>Windows 11 Enterprise</td><td>OU=Finance,OU=Workstations</td><td>2026-05-09</td></tr>
+          <tr><td>WS-EXEC-003</td><td>Windows 11 Enterprise</td><td>OU=Exec,OU=Workstations</td><td>2026-05-07</td></tr>
+          <tr><td>WS-DEV-042</td><td>Windows 10 Pro</td><td>OU=Dev,OU=Workstations</td><td>2026-05-09</td></tr>
+          <tr class="more-row"><td colspan="4">... and 182 more workstations</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>For Windows 11 22H2+ and Server 2022+: use Windows LAPS (built-in, preferred)</li>
+        <li>For older OS: deploy Microsoft LAPS via GPO (download from Microsoft)</li>
+        <li>Extend AD schema: Update-LapsADSchema (Windows LAPS) or import AdmPwd.ps1 (legacy LAPS)</li>
+        <li>Create GPO to enable LAPS on all workstation OUs with 30-day rotation</li>
+        <li>Restrict who can read ms-Mcs-AdmPwd to Helpdesk and Domain Admins only</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- F9: MEDIUM Stale users -->
+<div class="finding-card" data-risk="medium" data-category="Stale" data-id="f9">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#e6a817">Medium</span>
+    <span class="rule-id">S-StaleUser</span>
+    <span class="finding-title">Stale user accounts — 43 enabled accounts inactive for 180+ days</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Stale</span>
+      <span class="data-count">43 affected</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1078/002/" target="_blank">T1078.002</a>
+    </span>
+  </div>
+  <div class="finding-body" id="fb9" style="display:none">
+    <div class="finding-desc">43 enabled user accounts have not logged in for more than 180 days. Stale accounts are prime targets for credential stuffing, password spraying, and persistence — attackers can use them with less risk of detection since the account owner won't notice unusual activity.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">Stale Accounts (showing first 8 of 43)</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>Username</th><th>Display Name</th><th>Last Logon</th><th>Days Inactive</th><th>OU</th></tr></thead>
+        <tbody>
+          <tr><td>jdoe_old</td><td>Jane Doe (Left 2024)</td><td>2024-08-14</td><td>268</td><td>OU=Sales</td></tr>
+          <tr><td>contractor_bob</td><td>Bob K. (Contractor)</td><td>2024-07-02</td><td>311</td><td>OU=Contractors</td></tr>
+          <tr><td>svc_oldapp</td><td>Old Application SA</td><td>2024-03-22</td><td>413</td><td>OU=ServiceAccounts</td></tr>
+          <tr><td>mwilson</td><td>Mark Wilson</td><td>2024-06-01</td><td>342</td><td>OU=IT</td></tr>
+          <tr><td>temp_2023q4</td><td>Temp Account Q4 2023</td><td>2023-12-28</td><td>497</td><td>OU=Temp</td></tr>
+          <tr><td>lparker</td><td>Lisa Parker</td><td>2024-09-10</td><td>241</td><td>OU=HR</td></tr>
+          <tr><td>admin_test</td><td>Admin Test Account</td><td>2024-05-18</td><td>356</td><td>OU=Users</td></tr>
+          <tr><td>rmartin</td><td>Rob Martin (Retired)</td><td>2024-07-30</td><td>283</td><td>OU=Finance</td></tr>
+          <tr class="more-row"><td colspan="5">... and 35 more stale accounts</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Implement lifecycle management: HR offboarding must trigger AD account disablement same-day</li>
+        <li>Disable (do not delete) accounts inactive 90 days: Disable-ADAccount -Identity username</li>
+        <li>Move disabled accounts to a quarantine OU with no GPO linking</li>
+        <li>Delete accounts that have been disabled for 180+ days after manager confirmation</li>
+        <li>Use Account Expires attribute for all contractor and temporary accounts at creation time</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- F10: LOW Empty groups -->
+<div class="finding-card" data-risk="low" data-category="Accounts" data-id="f10">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#20c997">Low</span>
+    <span class="rule-id">A-EmptyGroup</span>
+    <span class="finding-title">Empty security groups — 12 groups with no members</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Accounts</span>
+      <span class="data-count">12 affected</span>
+      <span class="ttp-none">—</span>
+    </span>
+  </div>
+  <div class="finding-body" id="fb10" style="display:none">
+    <div class="finding-desc">12 security groups have no members but may still appear in ACLs. Attackers who compromise an account can be added to empty groups without triggering alerts on high-membership groups. Empty groups also create noise during permission reviews.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">Empty Groups (12)</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>Group Name</th><th>Created</th><th>Last Changed</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>ITHelpdesk-Old</td><td>2019-03-14</td><td>2021-06-01</td><td>Old helpdesk group</td></tr>
+          <tr><td>Dev-Readonly</td><td>2020-08-22</td><td>2020-08-22</td><td></td></tr>
+          <tr><td>Contractors-2021</td><td>2021-01-04</td><td>2021-12-31</td><td>2021 contractors</td></tr>
+          <tr><td>VPN-Legacy</td><td>2018-11-09</td><td>2020-03-15</td><td>Legacy VPN access</td></tr>
+          <tr><td>SharePoint-Readers</td><td>2022-04-12</td><td>2022-04-12</td><td></td></tr>
+          <tr class="more-row"><td colspan="4">... and 7 more empty groups</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Review each group and confirm it is not referenced in any ACL or application config</li>
+        <li>Delete confirmed-unused groups: Remove-ADGroup -Identity "ITHelpdesk-Old"</li>
+        <li>For groups that may have future use: add a description explaining purpose and review date</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- INFO finding -->
+<div class="finding-card" data-risk="info" data-category="Anomalies" data-id="f11">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#6c757d">Info</span>
+    <span class="rule-id">A-DNSZoneInventory</span>
+    <span class="finding-title">DNS zone inventory — 4 AD-integrated zones found</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Anomalies</span>
+      <span class="data-count">4 zones</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1590/002/" target="_blank">T1590.002</a>
+    </span>
+  </div>
+  <div class="finding-body" id="fb11" style="display:none">
+    <div class="finding-desc">The following AD-integrated DNS zones were discovered. Review each for insecure dynamic update settings and DNSSEC signing status. Wildcard records and unsigned zones may enable name spoofing attacks.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">DNS Zones (4)</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>Zone Name</th><th>DNSSEC Signed</th></tr></thead>
+        <tbody>
+          <tr><td>corp.local</td><td>No</td></tr>
+          <tr><td>_msdcs.corp.local</td><td>No</td></tr>
+          <tr><td>10.0.1.x.in-addr.arpa</td><td>No</td></tr>
+          <tr><td>partner.local</td><td>No</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Review DNS zone properties: ensure "Secure only" dynamic updates on all internal zones</li>
+        <li>Consider enabling DNSSEC on public-facing zones via DNS Manager</li>
+        <li>Verify no wildcard A records exist that could enable WPAD poisoning</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+    <div class="no-results" id="no-results">No findings match the current filter.</div>
+  </div>
+</div>
+
+</div>
+
+<div class="footer">
+  <strong>AD-Recon by Harsh P</strong> &nbsp;|&nbsp;
+  <a href="https://github.com/MrHarshvardhan" target="_blank">github.com/MrHarshvardhan</a> &nbsp;|&nbsp;
+  Score: 42/100 &nbsp;|&nbsp; 24 findings (3 Critical, 7 High, 9 Medium, 3 Low, 2 Info) &nbsp;|&nbsp;
+  Generated: 2026-05-09 14:32
+</div>
+
+<script>
+var currentFilter = 'all';
+var searchTerm = '';
+
+function toggleFinding(hdr) {
+  var body = hdr.nextElementSibling;
+  var chevron = hdr.querySelector('.chevron');
+  var open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  chevron.classList.toggle('open', !open);
+}
+
+function expandAll() {
+  document.querySelectorAll('.finding-card:not([style*="display:none"]) .finding-hdr').forEach(function(h){
+    h.nextElementSibling.style.display = 'block';
+    h.querySelector('.chevron').classList.add('open');
+  });
+}
+function collapseAll() {
+  document.querySelectorAll('.finding-body').forEach(function(b){ b.style.display='none'; });
+  document.querySelectorAll('.chevron').forEach(function(c){ c.classList.remove('open'); });
+}
+
+function toggleSection(hdr) {
+  var body = hdr.nextElementSibling;
+  var icon = hdr.querySelector('.toggle-icon');
+  var open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : '';
+  icon.innerHTML = open ? '&#9650;' : '&#9660;';
+}
+
+function setFilter(risk) {
+  currentFilter = risk;
+  document.querySelectorAll('.fbtn').forEach(function(b){ b.classList.remove('active'); });
+  var active = document.querySelector('.fbtn-'+risk);
+  if (active) active.classList.add('active');
+  applyFilters();
+}
+
+function applyFilters() {
+  searchTerm = document.getElementById('searchInput').value.toLowerCase();
+  var cards = document.querySelectorAll('.finding-card');
+  var visible = 0;
+  cards.forEach(function(card) {
+    var riskMatch = (currentFilter === 'all' || card.dataset.risk === currentFilter);
+    var text = card.querySelector('.finding-hdr').textContent.toLowerCase();
+    var bodyEl = card.querySelector('.finding-body');
+    if (bodyEl) text += bodyEl.textContent.toLowerCase();
+    var textMatch = !searchTerm || text.indexOf(searchTerm) !== -1;
+    var show = riskMatch && textMatch;
+    card.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  document.getElementById('results-label').textContent =
+    'Showing ' + visible + ' of ' + cards.length + ' findings — click any row to expand details';
+  document.getElementById('no-results').style.display = visible === 0 ? 'block' : 'none';
+}
+
+function exportCSV() {
+  var rows = [['Risk','Rule ID','Title','Category','MITRE ATT&CK','Affected Count','Description']];
+  document.querySelectorAll('.finding-card').forEach(function(card) {
+    var risk = (card.querySelector('.risk-pill')||{}).textContent||'';
+    var ruleId = (card.querySelector('.rule-id')||{}).textContent||'';
+    var title = (card.querySelector('.finding-title')||{}).textContent||'';
+    var cat = (card.querySelector('.cat-tag')||{}).textContent||'';
+    var ttp = (card.querySelector('.ttp-link')||{}).textContent||'';
+    var cnt = (card.querySelector('.data-count')||{}).textContent||'';
+    var desc = (card.querySelector('.finding-desc')||{}).textContent.trim()||'';
+    rows.push([risk,ruleId,title,cat,ttp,cnt,desc]);
+  });
+  var csv = rows.map(function(r){
+    return r.map(function(c){ return '"'+String(c).replace(/"/g,'""')+'"'; }).join(',');
+  }).join('\r\n');
+  var blob = new Blob([csv],{type:'text/csv'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'ADRecon-Findings-CORP.LOCAL.csv';
+  a.click();
+}
+
+applyFilters();
+</script>
+</body>
+</html>

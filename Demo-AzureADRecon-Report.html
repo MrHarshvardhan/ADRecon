@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AzureAD-Recon — Contoso Ltd</title>
+<style>
+:root{
+  --c:#dc3545;--h:#fd7e14;--m:#e6a817;--l:#20c997;--i:#6c757d;
+  --bg:#f0f4fb;--card:#fff;--border:#dde2ee;--text:#1a1d23;--sub:#5a6375;
+  --hdr1:#0050a0;--hdr2:#0078d4;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,Arial,sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+a{color:#0078d4;text-decoration:none}a:hover{text-decoration:underline}
+.hdr{background:linear-gradient(135deg,var(--hdr1),var(--hdr2));color:#fff;padding:28px 40px 24px;display:flex;align-items:center;gap:36px;flex-wrap:wrap}
+.hdr-text h1{font-size:1.7rem;font-weight:800;letter-spacing:-.3px}
+.hdr-text p{opacity:.75;margin-top:6px;font-size:.88rem}
+.hdr-meta{display:flex;gap:20px;margin-top:10px;flex-wrap:wrap}
+.hdr-meta span{font-size:.8rem;opacity:.8}.hdr-meta b{opacity:1}
+.stats-bar{background:#fff;border-bottom:1px solid var(--border);padding:0 40px;display:flex;flex-wrap:wrap}
+.stat-item{padding:16px 20px;display:flex;flex-direction:column;align-items:center;border-right:1px solid var(--border);cursor:pointer;transition:background .15s;min-width:90px}
+.stat-item:hover{background:#f0f4fb}
+.stat-num{font-size:1.5rem;font-weight:800;line-height:1}
+.stat-lbl{font-size:.7rem;color:var(--sub);margin-top:3px;text-transform:uppercase;letter-spacing:.4px}
+.sc{color:var(--c)}.sh{color:var(--h)}.sm{color:var(--m)}.sl{color:var(--l)}.si{color:var(--i)}.saz{color:#0078d4}
+.toolbar{background:#fff;border-bottom:1px solid var(--border);padding:10px 40px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:50;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.search-box{flex:1;min-width:200px;max-width:380px;position:relative}
+.search-box input{width:100%;padding:7px 12px 7px 34px;border:1px solid var(--border);border-radius:6px;font-size:.87rem;outline:none}
+.search-box input:focus{border-color:#0078d4;box-shadow:0 0 0 3px rgba(0,120,212,.12)}
+.search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--sub)}
+.filter-btns{display:flex;gap:6px;flex-wrap:wrap}
+.fbtn{padding:5px 14px;border-radius:20px;border:1.5px solid var(--border);background:#fff;font-size:.78rem;font-weight:600;cursor:pointer;transition:all .15s}
+.fbtn:hover{border-color:#0078d4;color:#0078d4}
+.fbtn.active{color:#fff;border-color:currentColor}
+.fbtn-all.active{background:#0078d4;border-color:#0078d4}
+.fbtn-critical.active{background:var(--c);border-color:var(--c)}
+.fbtn-high.active{background:var(--h);border-color:var(--h)}
+.fbtn-medium.active{background:var(--m);border-color:var(--m)}
+.fbtn-low.active{background:var(--l);border-color:var(--l)}
+.fbtn-info.active{background:var(--i);border-color:var(--i)}
+.toolbar-right{margin-left:auto;display:flex;gap:8px}
+.btn{padding:6px 14px;border-radius:6px;border:1.5px solid var(--border);background:#fff;font-size:.8rem;cursor:pointer;font-weight:600;transition:all .15s;display:flex;align-items:center;gap:5px}
+.btn:hover{border-color:#0078d4;color:#0078d4}
+.btn-primary{background:#0078d4;border-color:#0078d4;color:#fff}
+.btn-primary:hover{background:#006ac1}
+.container{max-width:1400px;margin:0 auto;padding:24px 40px}
+.section{background:var(--card);border:1px solid var(--border);border-radius:10px;margin-bottom:20px;overflow:hidden}
+.section-h{font-size:1rem;font-weight:700;padding:14px 20px;border-bottom:1px solid var(--border);background:#f8f9fc;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.section-h .toggle-icon{margin-left:auto;color:var(--sub);font-size:.8rem}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.info-col{padding:16px 20px}.info-col:first-child{border-right:1px solid var(--border)}
+.info-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed var(--border);font-size:.87rem}
+.info-row:last-child{border-bottom:none}
+.info-key{color:var(--sub)}.info-val{font-weight:600;text-align:right}
+.info-val.bad{color:var(--c)}.info-val.warn{color:var(--h)}.info-val.ok{color:#28a745}
+.info-tbl{width:100%;border-collapse:collapse;font-size:.87rem}
+.info-tbl th{background:#f8f9fc;padding:9px 14px;text-align:left;font-weight:600;border-bottom:2px solid var(--border);font-size:.8rem;text-transform:uppercase;letter-spacing:.3px;color:var(--sub)}
+.info-tbl td{padding:9px 14px;border-bottom:1px solid #f0f2f8}
+.info-tbl tr:last-child td{border-bottom:none}.info-tbl tr:hover td{background:#f8f9fc}
+.pill{display:inline-block;padding:2px 10px;border-radius:12px;font-size:.72rem;font-weight:700}
+.pill.ok{background:#d4edda;color:#155724}.pill.bad{background:#f8d7da;color:#721c24}.pill.warn{background:#fff3cd;color:#856404}
+.findings-toolbar{padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;background:#f8f9fc}
+.findings-count{font-size:.82rem;color:var(--sub)}
+.findings-list{padding:0}
+.finding-card{border-bottom:1px solid var(--border)}
+.finding-card:last-child{border-bottom:none}
+.finding-card[data-risk="critical"] .finding-hdr{border-left:4px solid var(--c)}
+.finding-card[data-risk="high"]     .finding-hdr{border-left:4px solid var(--h)}
+.finding-card[data-risk="medium"]   .finding-hdr{border-left:4px solid var(--m)}
+.finding-card[data-risk="low"]      .finding-hdr{border-left:4px solid var(--l)}
+.finding-card[data-risk="info"]     .finding-hdr{border-left:4px solid var(--i)}
+.finding-hdr{display:flex;align-items:center;gap:10px;padding:12px 20px;cursor:pointer;transition:background .12s;flex-wrap:wrap}
+.finding-hdr:hover{background:#f0f4fb}
+.chevron{color:var(--sub);font-size:.75rem;transition:transform .18s;flex-shrink:0}
+.chevron.open{transform:rotate(90deg)}
+.risk-pill{display:inline-block;padding:3px 11px;border-radius:20px;font-size:.72rem;font-weight:700;color:#fff;white-space:nowrap;flex-shrink:0}
+.rule-id{font-family:'Cascadia Code','Consolas',monospace;font-size:.78rem;color:var(--sub);background:#f0f2f8;padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0}
+.finding-title{font-weight:600;font-size:.92rem;flex:1;min-width:200px}
+.finding-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto;flex-shrink:0}
+.cat-tag{padding:2px 9px;border-radius:10px;background:#e5f0fb;color:#004578;font-size:.72rem;font-weight:600}
+.data-count{padding:2px 9px;border-radius:10px;background:#fff3cd;color:#856404;font-size:.72rem;font-weight:700;white-space:nowrap}
+.ttp-link{padding:2px 8px;border-radius:4px;background:#cce5ff;color:#004085;font-size:.72rem;font-weight:700;border:1px solid #b8daff;white-space:nowrap}
+.ttp-none{color:#bbb;font-size:.8rem}
+.finding-body{padding:0 20px 18px 52px;background:#f8fbff}
+.finding-desc{color:#3a4050;font-size:.87rem;line-height:1.65;margin-bottom:14px;padding-top:12px;border-top:1px dashed var(--border)}
+.affected-wrap{margin-bottom:14px}
+.affected-lbl{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--sub);margin-bottom:6px}
+.data-tbl-wrap{overflow-x:auto;border-radius:6px;border:1px solid var(--border)}
+.data-tbl{width:100%;border-collapse:collapse;font-size:.82rem}
+.data-tbl th{background:#e8f0fa;padding:7px 12px;text-align:left;font-weight:600;color:var(--sub);border-bottom:1px solid var(--border);font-size:.75rem;text-transform:uppercase;letter-spacing:.3px}
+.data-tbl td{padding:7px 12px;border-bottom:1px solid #f0f2f8;font-family:'Cascadia Code','Consolas',monospace;font-size:.8rem}
+.data-tbl tr:last-child td{border-bottom:none}.data-tbl tr:hover td{background:#f0f4fb}
+.more-row td{color:var(--sub);font-style:italic;text-align:center;padding:6px;font-family:inherit}
+.remed-wrap{background:#f0f7ff;border:1px solid #b8daff;border-radius:6px;padding:12px 16px}
+.remed-lbl{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#004085;margin-bottom:8px}
+.remed-list{padding-left:18px;color:#003366;font-size:.85rem;line-height:1.7}
+.remed-list li{margin-bottom:4px}
+.no-results{padding:40px;text-align:center;color:var(--sub);display:none}
+.footer{text-align:center;padding:24px;font-size:.8rem;color:var(--sub);border-top:1px solid var(--border);background:#fff;margin-top:8px}
+.footer strong{color:var(--text)}
+.auth-banner{background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px 20px;margin:20px 40px 0;display:flex;align-items:flex-start;gap:12px;font-size:.85rem}
+.auth-banner .icon{font-size:1.4rem;flex-shrink:0}
+.auth-banner code{background:#fff;padding:2px 6px;border-radius:4px;border:1px solid #ffc107;font-size:.82rem}
+@media(max-width:768px){
+  .hdr,.toolbar,.container,.stats-bar,.auth-banner{padding-left:16px;padding-right:16px}
+  .info-grid{grid-template-columns:1fr}
+  .info-col:first-child{border-right:none;border-bottom:1px solid var(--border)}
+  .finding-body{padding-left:16px}
+}
+@media print{.toolbar,.btn,.auth-banner{display:none}.finding-body{display:block !important}}
+</style>
+</head>
+<body>
+
+<!-- Auth notice banner -->
+<div class="auth-banner">
+  <span class="icon">&#128274;</span>
+  <div>
+    <strong>How authentication works:</strong> Run <code>.\Invoke-AzureADRecon.ps1 -UseDeviceCode</code> and the script prints a code + URL in the terminal.
+    Open <a href="https://microsoft.com/devicelogin" target="_blank">microsoft.com/devicelogin</a> in any browser, enter the code, and sign in with your Azure AD account.
+    No password is stored in the script. The session token expires after the audit completes.
+    Alternatively pass <code>-ClientId / -ClientSecret</code> for unattended automation, or run after <code>Connect-MgGraph</code>.
+  </div>
+</div>
+
+<div class="hdr">
+  <div style="flex-shrink:0;text-align:center">
+    <svg width="100" height="100" viewBox="0 0 120 120">
+      <circle cx="60" cy="60" r="54" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="10"/>
+      <circle cx="60" cy="60" r="54" fill="none" stroke="#fd7e14" stroke-width="10"
+              stroke-dasharray="203.6 135.7" stroke-linecap="round" transform="rotate(-90 60 60)"/>
+      <text x="60" y="56" text-anchor="middle" dominant-baseline="middle"
+            font-size="26" font-weight="900" fill="#fd7e14">60</text>
+      <text x="60" y="74" text-anchor="middle" font-size="10" fill="rgba(255,255,255,.55)" letter-spacing="1">/ 100</text>
+    </svg>
+  </div>
+  <div class="hdr-text">
+    <h1>&#9729; AzureAD-Recon — Contoso Ltd</h1>
+    <p>Entra ID / Azure Active Directory security assessment</p>
+    <div class="hdr-meta">
+      <span><b>Tenant ID:</b> a1b2c3d4-e5f6-7890-abcd-ef1234567890</span>
+      <span><b>Generated:</b> 2026-05-09 15:44</span>
+      <span><b>Duration:</b> 63s</span>
+      <span><b>Auth:</b> Device Code (delegated)</span>
+    </div>
+  </div>
+</div>
+
+<div class="stats-bar">
+  <div class="stat-item" onclick="setFilter('critical')"><span class="stat-num sc">2</span><span class="stat-lbl">Critical</span></div>
+  <div class="stat-item" onclick="setFilter('high')"><span class="stat-num sh">5</span><span class="stat-lbl">High</span></div>
+  <div class="stat-item" onclick="setFilter('medium')"><span class="stat-num sm">6</span><span class="stat-lbl">Medium</span></div>
+  <div class="stat-item" onclick="setFilter('low')"><span class="stat-num sl">2</span><span class="stat-lbl">Low</span></div>
+  <div class="stat-item" onclick="setFilter('info')"><span class="stat-num si">2</span><span class="stat-lbl">Info</span></div>
+  <div class="stat-item"><span class="stat-num saz">234</span><span class="stat-lbl">Guests</span></div>
+  <div class="stat-item"><span class="stat-num saz">4</span><span class="stat-lbl">CA Policies</span></div>
+  <div class="stat-item"><span class="stat-num saz">8</span><span class="stat-lbl">Global Admins</span></div>
+</div>
+
+<div class="toolbar">
+  <div class="search-box">
+    <span class="search-icon">&#128269;</span>
+    <input type="text" id="searchInput" placeholder="Search findings, users, app names..." oninput="applyFilters()">
+  </div>
+  <div class="filter-btns">
+    <button class="fbtn fbtn-all active" onclick="setFilter('all')">All (17)</button>
+    <button class="fbtn fbtn-critical" onclick="setFilter('critical')">Critical (2)</button>
+    <button class="fbtn fbtn-high" onclick="setFilter('high')">High (5)</button>
+    <button class="fbtn fbtn-medium" onclick="setFilter('medium')">Medium (6)</button>
+    <button class="fbtn fbtn-low" onclick="setFilter('low')">Low (2)</button>
+    <button class="fbtn fbtn-info" onclick="setFilter('info')">Info (2)</button>
+  </div>
+  <div class="toolbar-right">
+    <button class="btn" onclick="expandAll()">&#8597; Expand All</button>
+    <button class="btn" onclick="collapseAll()">&#8597; Collapse All</button>
+    <button class="btn btn-primary" onclick="exportCSV()">&#8677; Export CSV</button>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- Tenant Info -->
+<div class="section">
+  <h2 class="section-h" onclick="toggleSection(this)">Tenant Information <span class="toggle-icon">&#9660;</span></h2>
+  <div class="section-body">
+    <div class="info-grid">
+      <div class="info-col">
+        <div class="info-row"><span class="info-key">Tenant Name</span><span class="info-val">Contoso Ltd</span></div>
+        <div class="info-row"><span class="info-key">Tenant ID</span><span class="info-val">a1b2c3d4-e5f6-7890-abcd-ef1234567890</span></div>
+        <div class="info-row"><span class="info-key">Verified Domains</span><span class="info-val">contoso.com, contoso.onmicrosoft.com</span></div>
+        <div class="info-row"><span class="info-key">Hybrid Identity Sync</span><span class="info-val">Yes (Azure AD Connect)</span></div>
+      </div>
+      <div class="info-col">
+        <div class="info-row"><span class="info-key">Security Defaults</span><span class="info-val bad">DISABLED</span></div>
+        <div class="info-row"><span class="info-key">Legacy Auth Blocked</span><span class="info-val bad">NO — exposed</span></div>
+        <div class="info-row"><span class="info-key">P2 License (PIM / IDP)</span><span class="info-val warn">No</span></div>
+        <div class="info-row"><span class="info-key">Global Administrators</span><span class="info-val bad">8</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Findings -->
+<div class="section">
+  <h2 class="section-h" style="cursor:default">Security Findings</h2>
+  <div class="findings-toolbar">
+    <span class="findings-count" id="results-label">Showing 17 findings — click any row to expand details</span>
+  </div>
+  <div class="findings-list" id="findings-list">
+
+<!-- C1: Security Defaults Disabled -->
+<div class="finding-card" data-risk="critical" data-category="Identity">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#dc3545">Critical</span>
+    <span class="rule-id">AZ-SecurityDefaults</span>
+    <span class="finding-title">Security Defaults disabled — no baseline MFA enforcement</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Identity</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1078/004/" target="_blank">T1078.004</a>
+    </span>
+  </div>
+  <div class="finding-body" style="display:none">
+    <div class="finding-desc">Security Defaults are disabled and no equivalent Conditional Access policy enforcing MFA for all users was detected. Without Security Defaults or CA policies, users and admins can authenticate using only a password — making the tenant trivially compromised via password spray or credential stuffing. Microsoft reports Security Defaults block over 99.9% of identity attacks.</div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>If you have no existing CA policies: re-enable Security Defaults in Azure Portal → Azure AD → Properties → Manage Security Defaults</li>
+        <li>If you have CA policies: create a policy requiring MFA for All Users / All Apps with no exclusions (or break-glass only)</li>
+        <li>Ensure the MFA policy is in Enabled state — not Report-only</li>
+        <li>Block legacy authentication protocols (Basic Auth) via a separate CA policy</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- C2: Admins without MFA -->
+<div class="finding-card" data-risk="critical" data-category="Identity">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#dc3545">Critical</span>
+    <span class="rule-id">AZ-AdminNoMFA</span>
+    <span class="finding-title">Privileged role members without MFA registered — 3 admins</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Identity</span>
+      <span class="data-count">3 affected</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1078/004/" target="_blank">T1078.004</a>
+    </span>
+  </div>
+  <div class="finding-body" style="display:none">
+    <div class="finding-desc">3 accounts with privileged Azure AD roles have no MFA methods registered. A password compromise of any of these accounts gives an attacker full administrative access to the tenant — including creating backdoor accounts, modifying CA policies, and accessing all data via Microsoft Graph.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">Admins Without MFA (3)</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>UPN</th><th>Display Name</th><th>Role</th><th>Account Type</th><th>Last Sign-In</th></tr></thead>
+        <tbody>
+          <tr><td>j.bloggs@contoso.com</td><td>James Bloggs</td><td>Global Administrator</td><td>Member</td><td>2026-05-07</td></tr>
+          <tr><td>svc_automation@contoso.com</td><td>Automation Account</td><td>Global Administrator</td><td>Member</td><td>2026-04-22</td></tr>
+          <tr><td>a.partner@contoso.com</td><td>Alex Partner</td><td>Privileged Role Administrator</td><td>Guest</td><td>2026-03-14</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Immediately register MFA for all 3 accounts: Azure AD → Users → MFA settings</li>
+        <li>For svc_automation: convert to a Service Principal / Managed Identity — human accounts should not be Global Admins</li>
+        <li>For guest a.partner: remove Privileged Role Administrator — guests must not hold privileged roles</li>
+        <li>Create a CA policy: require MFA for users with directory roles</li>
+        <li>Consider requiring phishing-resistant MFA (FIDO2/Windows Hello) for all GA accounts</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- H1: Too many Global Admins -->
+<div class="finding-card" data-risk="high" data-category="Identity">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#fd7e14">High</span>
+    <span class="rule-id">AZ-TooManyGlobalAdmins</span>
+    <span class="finding-title">Too many Global Administrators — 8 (recommended: 2–4)</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Identity</span>
+      <span class="data-count">8 affected</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1078/004/" target="_blank">T1078.004</a>
+    </span>
+  </div>
+  <div class="finding-body" style="display:none">
+    <div class="finding-desc">8 accounts hold the Global Administrator role. Microsoft recommends 2–4 break-glass GA accounts maximum. Each GA account is a full-tenant compromise vector. The more GA accounts, the larger the attack surface — each one can reset any user password, modify CA policies, read all mail via Graph, and create backdoor applications.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">Global Administrator Accounts (8)</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>UPN</th><th>Display Name</th><th>Account Type</th><th>MFA</th><th>Last Sign-In</th></tr></thead>
+        <tbody>
+          <tr><td>admin@contoso.com</td><td>Tenant Admin</td><td>Member</td><td>&#10003;</td><td>2026-05-09</td></tr>
+          <tr><td>j.bloggs@contoso.com</td><td>James Bloggs</td><td>Member</td><td>&#10007; NONE</td><td>2026-05-07</td></tr>
+          <tr><td>svc_automation@contoso.com</td><td>Automation Account</td><td>Member</td><td>&#10007; NONE</td><td>2026-04-22</td></tr>
+          <tr><td>breakglass1@contoso.com</td><td>Break Glass 1</td><td>Member</td><td>&#10003;</td><td>Never</td></tr>
+          <tr><td>breakglass2@contoso.com</td><td>Break Glass 2</td><td>Member</td><td>&#10003;</td><td>Never</td></tr>
+          <tr><td>m.smith@contoso.com</td><td>Mike Smith</td><td>Member</td><td>&#10003;</td><td>2026-05-06</td></tr>
+          <tr><td>it.admin@contoso.com</td><td>IT Admin</td><td>Member</td><td>&#10003;</td><td>2026-05-08</td></tr>
+          <tr><td>a.partner@contoso.com</td><td>Alex Partner</td><td>Guest</td><td>&#10007; NONE</td><td>2026-03-14</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Reduce Global Admins to 2–4 break-glass accounts only</li>
+        <li>Replace GA with least-privilege roles: m.smith → User Administrator, it.admin → Exchange Administrator</li>
+        <li>Remove guest a.partner from GA immediately — third parties must not hold GA</li>
+        <li>Convert svc_automation to a Service Principal with specific API permissions</li>
+        <li>Enable PIM (requires P2 license) to make remaining GA accounts eligible-only, not permanently assigned</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- H2: No CA policy blocking legacy auth -->
+<div class="finding-card" data-risk="high" data-category="ConditionalAccess">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#fd7e14">High</span>
+    <span class="rule-id">AZ-LegacyAuth</span>
+    <span class="finding-title">No Conditional Access policy blocking legacy authentication protocols</span>
+    <span class="finding-meta">
+      <span class="cat-tag">ConditionalAccess</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1078/004/" target="_blank">T1078.004</a>
+    </span>
+  </div>
+  <div class="finding-body" style="display:none">
+    <div class="finding-desc">No CA policy was found that blocks legacy authentication clients (Exchange ActiveSync, IMAP, POP3, SMTP AUTH, older Office clients). Legacy auth protocols do not support MFA — any MFA policy is bypassed if legacy auth is permitted. Microsoft reports 97% of password spray attacks use legacy authentication.</div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Create a CA policy: Assignments → All users | Client apps → Exchange ActiveSync clients + Other clients | Grant → Block access</li>
+        <li>Before enabling: check Sign-in logs for legacy auth usage (filter by Client App = "Exchange ActiveSync" etc.)</li>
+        <li>Communicate to users that IMAP/POP3 access to Exchange Online will be disabled — migrate to Modern Auth clients</li>
+        <li>Use Report-only mode for 2 weeks to assess impact before switching to Enabled</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- H3: App with high-privilege permissions -->
+<div class="finding-card" data-risk="high" data-category="Applications">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#fd7e14">High</span>
+    <span class="rule-id">AZ-HighPrivApp</span>
+    <span class="finding-title">Applications with high-privilege Graph permissions — 2 apps</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Applications</span>
+      <span class="data-count">2 affected</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1528/" target="_blank">T1528</a>
+    </span>
+  </div>
+  <div class="finding-body" style="display:none">
+    <div class="finding-desc">2 application service principals hold highly-privileged Graph API application permissions. A compromised app secret or certificate allows an attacker to impersonate the app and exercise these permissions without any user interaction or MFA — equivalent to a permanent backdoor.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">High-Privilege Applications (2)</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>App Name</th><th>App ID</th><th>Permission</th><th>Secret Expires</th></tr></thead>
+        <tbody>
+          <tr><td>DataPipeline-Prod</td><td>a1b2c3d4-1234</td><td>Directory.ReadWrite.All</td><td>2027-01-01 (200-year)</td></tr>
+          <tr><td>LegacySync-App</td><td>f9e8d7c6-5678</td><td>RoleManagement.ReadWrite.Directory</td><td>2025-12-31 (EXPIRED)</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Review DataPipeline-Prod — replace Directory.ReadWrite.All with the minimum required permission (e.g. User.Read.All)</li>
+        <li>LegacySync-App has an expired secret AND RoleManagement.ReadWrite.Directory — disable this app immediately</li>
+        <li>Rotate all app secrets to 1-year expiry maximum; set calendar reminders for renewal</li>
+        <li>Enable Azure AD access reviews for app permissions annually</li>
+        <li>Where possible, switch from application permissions to delegated permissions with user context</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- H4: Long-lived app secrets -->
+<div class="finding-card" data-risk="high" data-category="Applications">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#fd7e14">High</span>
+    <span class="rule-id">AZ-LongLivedSecret</span>
+    <span class="finding-title">Application secrets with extreme expiry — 1 secret expiring year 2226</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Applications</span>
+      <span class="data-count">1 affected</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1552/001/" target="_blank">T1552.001</a>
+    </span>
+  </div>
+  <div class="finding-body" style="display:none">
+    <div class="finding-desc">DataPipeline-Prod has a client secret set to expire in year 2226 (200-year expiry). Effectively this is a permanent credential — if it leaks it will never naturally expire and will require manual revocation. This is a common misconfiguration where developers set maximum expiry to avoid rotation work.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">Long-Lived Secrets</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>App Name</th><th>Secret Display Name</th><th>Created</th><th>Expires</th><th>Days Until Expiry</th></tr></thead>
+        <tbody>
+          <tr><td>DataPipeline-Prod</td><td>prod-key-1</td><td>2024-01-15</td><td>2226-01-15</td><td>73,344 days</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Create a new secret with 1-year expiry, update the application config, then delete the 200-year secret</li>
+        <li>Prefer certificate-based authentication over client secrets for production apps</li>
+        <li>Better option: migrate to Managed Identity if the app runs on Azure compute</li>
+        <li>Set organization policy: max secret lifetime 1 year via Azure AD access policies</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- M1: No MFA policy -->
+<div class="finding-card" data-risk="medium" data-category="ConditionalAccess">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#e6a817">Medium</span>
+    <span class="rule-id">AZ-NoMFAPolicy</span>
+    <span class="finding-title">No Conditional Access policy requiring MFA for all users</span>
+    <span class="finding-meta">
+      <span class="cat-tag">ConditionalAccess</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1078/004/" target="_blank">T1078.004</a>
+    </span>
+  </div>
+  <div class="finding-body" style="display:none">
+    <div class="finding-desc">No Conditional Access policy in Enabled state was found that requires MFA for all users across all applications. 4 CA policies exist but none cover all-users/all-apps without exclusions. Gaps in coverage allow attackers to authenticate without MFA by targeting uncovered user accounts or apps.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">Existing CA Policies (4 — none covering all users)</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>Policy Name</th><th>State</th><th>Users Scope</th><th>Apps Scope</th><th>Grant</th></tr></thead>
+        <tbody>
+          <tr><td>Require MFA for Admins</td><td>Enabled</td><td>Directory Roles only</td><td>All cloud apps</td><td>Require MFA</td></tr>
+          <tr><td>Block Legacy Auth</td><td>Report-only</td><td>All users</td><td>All cloud apps</td><td>Block</td></tr>
+          <tr><td>Require Compliant Device</td><td>Enabled</td><td>All users</td><td>Office 365</td><td>Compliant device</td></tr>
+          <tr><td>Named Location Bypass</td><td>Enabled</td><td>All users</td><td>All cloud apps</td><td>Allow (bypass MFA)</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Create a new CA policy: All users → All cloud apps → Require MFA (with break-glass exclusion only)</li>
+        <li>Change "Block Legacy Auth" from Report-only to Enabled after reviewing sign-in logs</li>
+        <li>Review "Named Location Bypass" — location-based MFA bypass is high risk; remove or scope tightly</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- M2: Guest invite open -->
+<div class="finding-card" data-risk="medium" data-category="GuestSettings">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#e6a817">Medium</span>
+    <span class="rule-id">AZ-GuestInviteEveryone</span>
+    <span class="finding-title">Anyone can invite guest users — allowInvitesFrom = everyone</span>
+    <span class="finding-meta">
+      <span class="cat-tag">GuestSettings</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1078/004/" target="_blank">T1078.004</a>
+    </span>
+  </div>
+  <div class="finding-body" style="display:none">
+    <div class="finding-desc">The guest invitation setting is configured to allow any user (not just admins) to invite external guests. This allows social engineering attacks where a compromised internal account invites attacker-controlled guest accounts into the tenant, which can then be used for persistence, data exfiltration via SharePoint/Teams, or lateral movement.</div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Azure AD → External Identities → External collaboration settings</li>
+        <li>Set "Guest invite settings" to "Only users assigned to specific admin roles can invite guest users"</li>
+        <li>Alternatively: restrict to "Admins and users in the guest inviter role"</li>
+        <li>Review existing guests (234 found) — run access review to confirm all are still required</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- M3: Stale guests -->
+<div class="finding-card" data-risk="medium" data-category="GuestSettings">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#e6a817">Medium</span>
+    <span class="rule-id">AZ-StaleGuests</span>
+    <span class="finding-title">Stale guest accounts — 47 guests inactive 90+ days</span>
+    <span class="finding-meta">
+      <span class="cat-tag">GuestSettings</span>
+      <span class="data-count">47 affected</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1078/004/" target="_blank">T1078.004</a>
+    </span>
+  </div>
+  <div class="finding-body" style="display:none">
+    <div class="finding-desc">47 of 234 guest accounts have not signed in for 90+ days. Stale guest accounts retain whatever permissions they were granted (SharePoint sites, Teams, app access) and represent dormant attack vectors — especially if the guest's home organization has been compromised.</div>
+    <div class="affected-wrap">
+      <div class="affected-lbl">Sample Stale Guests (first 5 of 47)</div>
+      <div class="data-tbl-wrap"><table class="data-tbl">
+        <thead><tr><th>UPN (Guest)</th><th>Display Name</th><th>Invited By</th><th>Last Sign-In</th><th>Days Inactive</th></tr></thead>
+        <tbody>
+          <tr><td>bob@externalco.com#EXT#</td><td>Bob External</td><td>j.smith@contoso.com</td><td>2025-10-14</td><td>207</td></tr>
+          <tr><td>consultant@agency.io#EXT#</td><td>Agency Consultant</td><td>m.jones@contoso.com</td><td>2025-08-30</td><td>252</td></tr>
+          <tr><td>vendor@supplier.net#EXT#</td><td>Supplier Vendor</td><td>it.admin@contoso.com</td><td>2025-07-11</td><td>302</td></tr>
+          <tr><td>partner@bigco.com#EXT#</td><td>BigCo Partner</td><td>admin@contoso.com</td><td>2025-06-22</td><td>321</td></tr>
+          <tr><td>temp@freelance.dev#EXT#</td><td>Freelancer</td><td>j.bloggs@contoso.com</td><td>Never</td><td>N/A</td></tr>
+          <tr class="more-row"><td colspan="5">... and 42 more stale guest accounts</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Create an Azure AD Access Review targeting all guest users: Azure AD → Identity Governance → Access Reviews</li>
+        <li>Set reviewers as the guest's sponsor/inviter or their manager</li>
+        <li>Configure auto-remove for guests who are not approved in the review</li>
+        <li>Establish a quarterly guest review cadence going forward</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- M4: No PIM -->
+<div class="finding-card" data-risk="medium" data-category="Identity">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#e6a817">Medium</span>
+    <span class="rule-id">AZ-NoPIM</span>
+    <span class="finding-title">Privileged Identity Management (PIM) not licensed — roles permanently assigned</span>
+    <span class="finding-meta">
+      <span class="cat-tag">Identity</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1078/004/" target="_blank">T1078.004</a>
+    </span>
+  </div>
+  <div class="finding-body" style="display:none">
+    <div class="finding-desc">No Azure AD P2 license was detected. Without PIM, all privileged role assignments are permanent — admins hold their roles 24/7 even when not performing administrative tasks. PIM enforces just-in-time activation with MFA, approval workflow, and time-limited sessions. Without it, a compromised admin account immediately has full privileges.</div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>License Azure AD P2 for all admin accounts (included in Microsoft 365 E5 or as add-on)</li>
+        <li>Once licensed: migrate all permanent privileged role assignments to PIM eligible assignments</li>
+        <li>Configure PIM activation requirements: MFA + justification + optional approval for GA role</li>
+        <li>Set maximum activation duration: 8 hours for GA, 4 hours for other roles</li>
+        <li>Enable PIM alerts for permanent assignments and unused eligible assignments</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- L1: SMS auth enabled -->
+<div class="finding-card" data-risk="low" data-category="AuthMethods">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#20c997">Low</span>
+    <span class="rule-id">AZ-SMSAuth</span>
+    <span class="finding-title">SMS / voice call MFA still enabled in authentication methods policy</span>
+    <span class="finding-meta">
+      <span class="cat-tag">AuthMethods</span>
+      <a class="ttp-link" href="https://attack.mitre.org/techniques/T1621/" target="_blank">T1621</a>
+    </span>
+  </div>
+  <div class="finding-body" style="display:none">
+    <div class="finding-desc">SMS and voice call authentication methods are enabled for the tenant. SMS is vulnerable to SIM-swapping attacks — attackers bribe or social-engineer mobile carriers to transfer a victim's phone number, then receive their SMS OTP. CISA and NIST both recommend against SMS as an MFA factor for privileged accounts.</div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Azure AD → Security → Authentication methods → SMS and Voice call → disable for all or admin-only group</li>
+        <li>Migrate users from SMS to Microsoft Authenticator app (push notifications or passkey)</li>
+        <li>For privileged accounts: require FIDO2 security keys or Windows Hello for Business</li>
+        <li>Run MFA registration campaign: notify users to update their MFA methods before SMS is disabled</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- INFO: Hybrid sync -->
+<div class="finding-card" data-risk="info" data-category="HybridIdentity">
+  <div class="finding-hdr" onclick="toggleFinding(this)">
+    <span class="chevron">&#9656;</span>
+    <span class="risk-pill" style="background:#6c757d">Info</span>
+    <span class="rule-id">AZ-SyncStale</span>
+    <span class="finding-title">Azure AD Connect last sync: 3 hours ago — within normal range</span>
+    <span class="finding-meta">
+      <span class="cat-tag">HybridIdentity</span>
+      <span class="ttp-none">—</span>
+    </span>
+  </div>
+  <div class="finding-body" style="display:none">
+    <div class="finding-desc">Azure AD Connect last successfully synchronized at 2026-05-09 12:41 UTC (3h 3m ago). Normal sync interval is every 30 minutes — this suggests a sync issue or the Connect server was temporarily offline. Monitor for extended sync gaps as they delay password changes, account disablements, and group membership propagation from on-premises to Azure AD.</div>
+    <div class="remed-wrap">
+      <div class="remed-lbl">Remediation Steps</div>
+      <ol class="remed-list">
+        <li>Check the Azure AD Connect server event log for errors: Event Viewer → Application → ADSync</li>
+        <li>Run: Start-ADSyncSyncCycle -PolicyType Delta to trigger a manual sync</li>
+        <li>Verify Azure AD Connect Health agent is running and reporting to Azure AD</li>
+        <li>Set up alerts in Azure Monitor for sync latency > 2 hours</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+    <div class="no-results" id="no-results" style="display:none">No findings match the current filter.</div>
+  </div>
+</div>
+
+</div>
+
+<div class="footer">
+  <strong>AzureAD-Recon by Harsh P</strong> &nbsp;|&nbsp;
+  <a href="https://github.com/MrHarshvardhan" target="_blank">github.com/MrHarshvardhan</a> &nbsp;|&nbsp;
+  Score: 60/100 &nbsp;|&nbsp; 17 findings (2 Critical, 5 High, 6 Medium, 2 Low, 2 Info) &nbsp;|&nbsp;
+  Generated: 2026-05-09 15:44
+</div>
+
+<script>
+var currentFilter='all',searchTerm='';
+function toggleFinding(hdr){
+  var body=hdr.nextElementSibling,ch=hdr.querySelector('.chevron'),open=body.style.display!=='none';
+  body.style.display=open?'none':'block';ch.classList.toggle('open',!open);
+}
+function expandAll(){
+  document.querySelectorAll('.finding-card:not([style*="display:none"]) .finding-hdr').forEach(function(h){
+    h.nextElementSibling.style.display='block';h.querySelector('.chevron').classList.add('open');
+  });
+}
+function collapseAll(){
+  document.querySelectorAll('.finding-body').forEach(function(b){b.style.display='none';});
+  document.querySelectorAll('.chevron').forEach(function(c){c.classList.remove('open');});
+}
+function toggleSection(hdr){
+  var body=hdr.nextElementSibling,icon=hdr.querySelector('.toggle-icon'),open=body.style.display!=='none';
+  body.style.display=open?'none':'';icon.innerHTML=open?'&#9650;':'&#9660;';
+}
+function setFilter(risk){
+  currentFilter=risk;
+  document.querySelectorAll('.fbtn').forEach(function(b){b.classList.remove('active');});
+  var a=document.querySelector('.fbtn-'+risk);if(a)a.classList.add('active');
+  applyFilters();
+}
+function applyFilters(){
+  searchTerm=document.getElementById('searchInput').value.toLowerCase();
+  var cards=document.querySelectorAll('.finding-card'),visible=0;
+  cards.forEach(function(card){
+    var rm=(currentFilter==='all'||card.dataset.risk===currentFilter);
+    var text=card.querySelector('.finding-hdr').textContent.toLowerCase();
+    var fb=card.querySelector('.finding-body');if(fb)text+=fb.textContent.toLowerCase();
+    var show=rm&&(!searchTerm||text.indexOf(searchTerm)!==-1);
+    card.style.display=show?'':'none';if(show)visible++;
+  });
+  document.getElementById('results-label').textContent=
+    'Showing '+visible+' of '+cards.length+' findings — click any row to expand details';
+  document.getElementById('no-results').style.display=visible===0?'block':'none';
+}
+function exportCSV(){
+  var rows=[['Risk','Rule ID','Title','Category','MITRE ATT&CK','Affected Count','Description']];
+  document.querySelectorAll('.finding-card').forEach(function(card){
+    var risk=(card.querySelector('.risk-pill')||{}).textContent||'';
+    var ruleId=(card.querySelector('.rule-id')||{}).textContent||'';
+    var title=(card.querySelector('.finding-title')||{}).textContent||'';
+    var cat=(card.querySelector('.cat-tag')||{}).textContent||'';
+    var ttp=(card.querySelector('.ttp-link')||{}).textContent||'';
+    var cnt=(card.querySelector('.data-count')||{}).textContent||'';
+    var desc=(card.querySelector('.finding-desc')||{}).textContent.trim()||'';
+    rows.push([risk,ruleId,title,cat,ttp,cnt,desc]);
+  });
+  var csv=rows.map(function(r){return r.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"';}).join(',');}).join('\r\n');
+  var blob=new Blob([csv],{type:'text/csv'}),a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download='AzureADRecon-Contoso.csv';a.click();
+}
+applyFilters();
+</script>
+</body>
+</html>
