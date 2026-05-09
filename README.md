@@ -6,7 +6,7 @@
 
 ## Overview
 
-**AD-Recon** is a self-contained PowerShell script that performs a comprehensive security audit of an Active Directory environment and outputs a single self-contained HTML report. It replicates (and extends) the checks performed by enterprise tools like PingCastle, using only built-in .NET ADSI / DirectorySearcher APIs.
+**AD-Recon** is a self-contained PowerShell script that performs a comprehensive security audit of an Active Directory environment and outputs a single self-contained HTML report. It replicates (and extends) the checks performed by enterprise tools, using only built-in .NET ADSI / DirectorySearcher APIs.
 
 A companion script, **AzureAD-Recon**, covers Microsoft Entra ID (Azure AD) via the Microsoft Graph API.
 
