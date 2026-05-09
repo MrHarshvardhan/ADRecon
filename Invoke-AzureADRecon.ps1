@@ -165,6 +165,10 @@ $Script:MitreTTPMap = @{
     'AZ-NonCompliantDevice'   = 'T1078.004'
     'AZ-SSPRWeakMethod'       = 'T1621'
     'AZ-SyncedAdmin'          = 'T1078.004'
+    'AZ-NoSignInFrequency'    = 'T1078.004'
+    'AZ-SPExpiredCert'        = 'T1552.001'
+    'AZ-OpenGroupCreation'    = 'T1136.001'
+    'AZ-CrossTenantInbound'   = 'T1199'
 }
 $Script:FailedModules = [System.Collections.Generic.List[hashtable]]::new()
 $Script:Token         = $null
@@ -1238,6 +1242,240 @@ function Invoke-CheckAdminAccounts {
 
 #endregion
 
+#region ── CHECK: Sign-In Frequency & Persistent Sessions ───────────────────
+
+function Invoke-CheckSignInFrequency {
+    Write-Status "Checking Conditional Access session controls (sign-in frequency)..."
+
+    $caPolicies = Get-GraphAll -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies?$select=id,displayName,state,sessionControls,conditions"
+    $enabled    = @($caPolicies | Where-Object { $_.state -eq 'enabled' })
+
+    $hasFreqPolicy        = $false
+    $hasPersistentBlock   = $false
+
+    foreach ($p in $enabled) {
+        $sc = $p.sessionControls
+        if ($sc -and $sc.signInFrequency -and $sc.signInFrequency.isEnabled -eq $true) {
+            $hasFreqPolicy = $true
+        }
+        if ($sc -and $sc.persistentBrowser -and $sc.persistentBrowser.isEnabled -eq $true -and
+            $sc.persistentBrowser.mode -eq 'never') {
+            $hasPersistentBlock = $true
+        }
+    }
+
+    if (-not $hasFreqPolicy) {
+        Add-Finding -Category 'ConditionalAccess' -RuleId 'AZ-NoSignInFrequency' `
+            -Title 'No Conditional Access policy enforces sign-in frequency (session re-authentication)' `
+            -Risk 'Medium' `
+            -Detail "Without sign-in frequency controls, refresh tokens are valid indefinitely (or up to 90 days by default). A stolen refresh token gives persistent access with no forced re-authentication. Attackers who steal tokens via AiTM phishing, malware, or OAuth consent maintain access until the token is explicitly revoked." `
+            -Remediation "Create a CA policy with session controls: Session Controls > Sign-in frequency > set to 1-8 hours for privileged users, 24 hours for regular users. Additionally enable Continuous Access Evaluation (CAE) for near-real-time token revocation on user risk events."
+    }
+
+    if (-not $hasPersistentBlock) {
+        Add-Finding -Category 'ConditionalAccess' -RuleId 'AZ-PersistentBrowser' `
+            -Title 'No CA policy blocks persistent browser sessions (Stay signed in)' `
+            -Risk 'Low' `
+            -Detail "Persistent browser sessions (the Stay signed in? prompt) allow long-lived session cookies on shared or unmanaged devices. On a compromised or shared device, these sessions persist beyond the user closing the browser." `
+            -Remediation "Add session control to relevant CA policies: Session Controls > Persistent browser session > Never persistent. Apply at minimum to policies covering unmanaged/non-compliant devices."
+    }
+
+    Write-OK "Sign-in frequency: check complete (freq=$hasFreqPolicy, persistentBlock=$hasPersistentBlock)"
+}
+
+#endregion
+
+#region ── CHECK: Service Principal Certificate Expiry ───────────────────────
+
+function Invoke-CheckSPCertificates {
+    Write-Status "Checking service principal certificate credentials for expiry..."
+
+    $now = Get-Date
+    $sps = Get-GraphAll -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$select=id,displayName,keyCredentials&`$top=999"
+
+    $expiredCerts  = [System.Collections.Generic.List[hashtable]]::new()
+    $expiringCerts = [System.Collections.Generic.List[hashtable]]::new()
+    $noExpiryCerts = [System.Collections.Generic.List[hashtable]]::new()
+
+    foreach ($sp in $sps) {
+        if (-not $sp.keyCredentials -or $sp.keyCredentials.Count -eq 0) { continue }
+        foreach ($cert in $sp.keyCredentials) {
+            if (-not $cert.endDateTime) { continue }
+            try {
+                $expiry     = [datetime]$cert.endDateTime
+                $daysLeft   = [int]($expiry - $now).TotalDays
+                $expiryStr  = $expiry.ToString('yyyy-MM-dd')
+
+                if ($expiry -lt $now) {
+                    $expiredCerts.Add(@{ App=$sp.displayName; Expiry=$expiryStr; DaysAgo=[Math]::Abs($daysLeft) }) | Out-Null
+                } elseif ($daysLeft -lt 30) {
+                    $expiringCerts.Add(@{ App=$sp.displayName; Expiry=$expiryStr; DaysLeft=$daysLeft }) | Out-Null
+                } elseif ($cert.endDateTime -match '2299|9999') {
+                    $noExpiryCerts.Add(@{ App=$sp.displayName; Expiry=$expiryStr }) | Out-Null
+                }
+            } catch {}
+        }
+    }
+
+    if ($expiredCerts.Count -gt 0) {
+        Add-Finding -Category 'Applications' -RuleId 'AZ-SPExpiredCert' `
+            -Title "$($expiredCerts.Count) service principal(s) have EXPIRED certificate credentials" `
+            -Risk 'Medium' `
+            -Detail "Expired certificate credentials on service principals cause authentication failures for dependent applications. While expired certs cannot be actively used for auth, their presence indicates the certificate lifecycle is not being managed — the same oversight likely affects other certs and secrets that ARE still valid." `
+            -Remediation "Rotate expired certificates immediately. Implement certificate lifecycle alerts in Entra ID (Monitor > Diagnostic settings) or via a custom script to alert 60/30/7 days before expiry. Consider Managed Identities which eliminate certificate management entirely." `
+            -Data ($expiredCerts | Select-Object -First 20)
+    }
+
+    if ($expiringCerts.Count -gt 0) {
+        Add-Finding -Category 'Applications' -RuleId 'AZ-SPExpiringCert' `
+            -Title "$($expiringCerts.Count) service principal(s) have certificates expiring within 30 days" `
+            -Risk 'Medium' `
+            -Detail "Certificate credentials expiring within 30 days will soon cause authentication failures if not rotated. Application outages from expired certs are a common and avoidable incident." `
+            -Remediation "Rotate expiring certificates before expiry date. Establish an alerting process for certificate expiry at 60, 30, and 7 days. Use Azure Key Vault with auto-rotation policies." `
+            -Data ($expiringCerts | Select-Object -First 20)
+    }
+
+    Write-OK "SP Certificates: $($expiredCerts.Count) expired, $($expiringCerts.Count) expiring soon"
+}
+
+#endregion
+
+#region ── CHECK: M365 Group and App Registration Creation Policy ─────────────
+
+function Invoke-CheckGroupSettings {
+    Write-Status "Checking who can create Microsoft 365 Groups and app registrations..."
+
+    # Group creation policy via directory settings
+    $settings = Get-GraphAll -Uri "https://graph.microsoft.com/v1.0/groupSettings"
+    $groupPolicy = $settings | Where-Object { $_.templateId -match '62375ab9|08d542b9' }
+
+    if ($groupPolicy) {
+        $enableGroupCreation = ($groupPolicy.values | Where-Object { $_.name -eq 'EnableGroupCreation' }).value
+        $groupCreatorsGroup  = ($groupPolicy.values | Where-Object { $_.name -eq 'GroupCreationAllowedGroupId' }).value
+
+        if ($enableGroupCreation -eq 'true' -and -not $groupCreatorsGroup) {
+            Add-Finding -Category 'GuestSettings' -RuleId 'AZ-OpenGroupCreation' `
+                -Title 'Any user can create Microsoft 365 Groups (no creation restriction configured)' `
+                -Risk 'Low' `
+                -Detail "When any user can create M365 Groups, they also create associated Teams, SharePoint sites, Planner boards, and shared mailboxes. This leads to uncontrolled data sprawl, external sharing exposure (if each Group owner can invite guests), and increased attack surface from abandoned resources." `
+                -Remediation "Restrict group creation: (1) Set EnableGroupCreation = false in directory settings. (2) Create a designated group (e.g. 'Group Creators') and set GroupCreationAllowedGroupId. (3) Implement an approval workflow via Microsoft Forms or Power Automate for group requests."
+        }
+    }
+
+    # App registration policy (can all users create app registrations?)
+    $authPolicy = Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/policies/authorizationPolicy"
+    if ($authPolicy -and $authPolicy.defaultUserRolePermissions) {
+        if ($authPolicy.defaultUserRolePermissions.allowedToCreateApps -eq $true) {
+            Add-Finding -Category 'Applications' -RuleId 'AZ-UserCreateApps' `
+                -Title 'Any user can register Azure AD application registrations' `
+                -Risk 'Medium' `
+                -Detail "Users who can create app registrations can request OAuth permissions, potentially tricking other users into granting consent to malicious apps (consent phishing). They can also create apps that obtain tokens for Microsoft Graph and use those for data exfiltration." `
+                -Remediation "Disable in Entra ID > User Settings: set 'Users can register applications' = No. Implement an admin consent workflow so legitimate app registration requests go through IT review."
+        }
+    }
+
+    Write-OK "Group settings check complete"
+}
+
+#endregion
+
+#region ── CHECK: Cross-Tenant Access Policy (Inbound B2B Trust) ─────────────
+
+function Invoke-CheckCrossTenantAccess {
+    Write-Status "Checking cross-tenant access (B2B inbound) settings..."
+
+    $ctap = Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/policies/crossTenantAccessPolicy/default"
+    if (-not $ctap) {
+        Write-OK "Cross-tenant access policy: not configured (or insufficient permissions)"
+        return
+    }
+
+    $inbound = $ctap.inboundTrust
+
+    # Check if MFA claims from external tenants are trusted
+    if ($inbound -and $inbound.isMfaAccepted -eq $true) {
+        Add-Finding -Category 'TenantConfig' -RuleId 'AZ-CrossTenantInbound' `
+            -Title 'Cross-tenant access policy trusts MFA claims from all external tenants' `
+            -Risk 'Medium' `
+            -Detail "Trusting MFA from external tenants means a user who completed MFA in their home tenant is considered MFA-satisfied in your tenant — even if their home tenant has weaker MFA requirements (e.g. SMS only). This can allow external users to bypass your MFA strength requirements." `
+            -Remediation "Review cross-tenant access settings: Entra ID > External Identities > Cross-tenant access settings. Either remove MFA trust from the default policy or configure per-tenant settings that only trust MFA from specific, hardened partner tenants."
+    }
+
+    # Check if compliant device claims from external tenants are trusted
+    if ($inbound -and $inbound.isCompliantDeviceAccepted -eq $true) {
+        Add-Finding -Category 'TenantConfig' -RuleId 'AZ-CrossTenantDeviceTrust' `
+            -Title 'Cross-tenant access policy trusts device compliance claims from all external tenants' `
+            -Risk 'Medium' `
+            -Detail "Trusting device compliance from external tenants means you rely on their Intune policies and compliance baselines — which may be weaker than yours. An external tenant with permissive compliance policies could allow non-compliant devices to access your resources." `
+            -Remediation "Remove or scope device compliance trust in cross-tenant access settings. Only trust device compliance from specific partner tenants after verifying their Intune policies meet your standards."
+    }
+
+    Write-OK "Cross-tenant access policy checked"
+}
+
+#endregion
+
+#region ── CHECK: Break-Glass Account Validation ─────────────────────────────
+
+function Invoke-CheckBreakGlassAccounts {
+    Write-Status "Validating break-glass (emergency access) account configuration..."
+
+    # Criteria for a proper break-glass account:
+    # 1. Cloud-only (not synced from on-prem)
+    # 2. Global Administrator role
+    # 3. Not included in any blocking CA policy (or excluded from all MFA policies)
+    # 4. Should ideally use .onmicrosoft.com UPN
+
+    $gasCloudOnly  = [System.Collections.Generic.List[hashtable]]::new()
+    $gasSynced     = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($upn in $Script:GlobalAdmins) {
+        $u = Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/users/${upn}?`$select=id,displayName,userPrincipalName,onPremisesSyncEnabled,accountEnabled"
+        if (-not $u) { continue }
+        if ($u.onPremisesSyncEnabled -eq $true) {
+            $gasSynced.Add($upn) | Out-Null
+        } elseif ($u.accountEnabled -eq $true) {
+            $gasCloudOnly.Add(@{
+                UPN           = $upn
+                Name          = $u.displayName
+                IsOnMSFTDomain= ($upn -match '\.onmicrosoft\.com$')
+            }) | Out-Null
+        }
+    }
+
+    # If ALL GAs are synced, there is no cloud-only break-glass
+    if ($gasCloudOnly.Count -eq 0 -and $Script:GlobalAdmins.Count -gt 0) {
+        Add-Finding -Category 'Roles' -RuleId 'AZ-NoBreakGlass' `
+            -Title 'No cloud-only Global Administrator account found — break-glass access may not be available' `
+            -Risk 'High' `
+            -Detail "All Global Administrator accounts appear to be synced from on-premises Active Directory. If Azure AD Connect, AD FS, or on-prem AD becomes unavailable, there is no cloud-native emergency access path. Microsoft strongly recommends at least 2 cloud-only (not synced) GA accounts as break-glass accounts for disaster recovery." `
+            -Remediation "1. Create 2 dedicated cloud-only GA accounts with .onmicrosoft.com UPNs (e.g. bg01@tenant.onmicrosoft.com). 2. Use 128+ character random passwords stored in a physical safe. 3. Exclude them from all CA policies. 4. Enable alerting on any sign-in from these accounts. 5. Test access quarterly." `
+            -Data @($Script:GlobalAdmins | ForEach-Object { @{ UPN=$_; Source='Synced' } })
+    } elseif ($gasCloudOnly.Count -lt 2) {
+        Add-Finding -Category 'Roles' -RuleId 'AZ-InsufficientBreakGlass' `
+            -Title "Only $($gasCloudOnly.Count) cloud-only GA account(s) found — Microsoft recommends at least 2 break-glass accounts" `
+            -Risk 'Medium' `
+            -Detail "Microsoft recommends a minimum of 2 cloud-only GA accounts for emergency access. With only 1, a single account compromise or lockout eliminates emergency recovery capability." `
+            -Remediation "Create a second cloud-only GA account for break-glass. Store credentials securely offline. Exclude both from all CA policies. Set up sign-in monitoring alerts." `
+            -Data $gasCloudOnly
+    } else {
+        # Check if any cloud-only GA uses .onmicrosoft.com (recommended)
+        $noMsDomain = @($gasCloudOnly | Where-Object { -not $_.IsOnMSFTDomain })
+        if ($noMsDomain.Count -gt 0) {
+            Add-Finding -Category 'Roles' -RuleId 'AZ-BreakGlassDomain' `
+                -Title "$($noMsDomain.Count) cloud-only GA account(s) do not use the .onmicrosoft.com domain (break-glass best practice)" `
+                -Risk 'Low' `
+                -Detail "Break-glass accounts should use the tenant's initial .onmicrosoft.com domain. Custom domain authentication depends on DNS and federation infrastructure that may be unavailable in a disaster scenario. The .onmicrosoft.com domain is always available regardless of DNS or AD FS state." `
+                -Remediation "Ensure break-glass accounts use UPNs in the format user@tenant.onmicrosoft.com. This guarantees login availability even if custom domain DNS is disrupted." `
+                -Data $noMsDomain
+        } else {
+            Write-OK "Break-glass: $($gasCloudOnly.Count) cloud-only GA accounts with .onmicrosoft.com domain found"
+        }
+    }
+}
+
+#endregion
+
 #region ── HTML Report ─────────────────────────────────────────────────────────
 
 function Get-RiskColor { param([string]$r)
@@ -1687,6 +1925,11 @@ $checks = @(
     @{ Name='Devices';            Fn={ Invoke-CheckDevices } }
     @{ Name='SSPR';               Fn={ Invoke-CheckSSPR } }
     @{ Name='AdminAccounts';      Fn={ Invoke-CheckAdminAccounts } }
+    @{ Name='SignInFrequency';    Fn={ Invoke-CheckSignInFrequency } }
+    @{ Name='SPCertificates';     Fn={ Invoke-CheckSPCertificates } }
+    @{ Name='GroupSettings';      Fn={ Invoke-CheckGroupSettings } }
+    @{ Name='CrossTenantAccess';  Fn={ Invoke-CheckCrossTenantAccess } }
+    @{ Name='BreakGlass';         Fn={ Invoke-CheckBreakGlassAccounts } }
 )
 
 foreach ($check in $checks) {

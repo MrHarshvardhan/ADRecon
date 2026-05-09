@@ -293,6 +293,10 @@ $Script:MitreTTPMap = @{
     'S-BitLockerACL'            = 'T1552.001'   # Unsecured Credentials: Credentials in Files
     'S-DNSZoneUnsigned'         = 'T1557.002'   # AiTM: DNS Spoofing
     'A-DNSZoneInventory'        = 'T1590.002'   # Gather Victim Network Info: DNS
+    'S-OrphanAdminCount'        = 'T1078.001'   # Valid Accounts: ghost privilege artefact
+    'S-PrintSpoolerDC'          = 'T1187'        # Forced Authentication via SpoolSS
+    'S-InactiveGPO'             = 'T1484.001'   # Domain Policy Modification via unlinked GPO
+    'S-OrphanFSP'               = 'T1078.002'   # Valid Accounts: Domain Accounts (FSP remnants)
 }
 
 function Add-Finding {
@@ -2313,6 +2317,218 @@ function Invoke-CheckDNSZones {
 #endregion
 
 
+#region ── CHECK: Orphaned adminCount ─────────────────────────────────────────
+
+function Invoke-CheckOrphanedAdminCount {
+    Write-Status "Checking for accounts with orphaned adminCount=1..."
+
+    $adminCountAccts = Invoke-Searcher `
+        -Filter "(&(objectCategory=person)(objectClass=user)(adminCount=1)(!(samAccountName=krbtgt))(!(userAccountControl:1.2.840.113556.1.4.803:=2)))" `
+        -Props @('sAMAccountName','distinguishedName')
+
+    if (-not $adminCountAccts -or @($adminCountAccts).Count -eq 0) {
+        Write-OK "Orphaned adminCount: none found"; return
+    }
+
+    $protectedGroups = @('Domain Admins','Enterprise Admins','Schema Admins','Administrators',
+                         'Account Operators','Backup Operators','Print Operators','Server Operators',
+                         'Group Policy Creator Owners','Replicator','Cert Publishers',
+                         'Read-only Domain Controllers','Denied RODC Password Replication Group')
+    $protectedDNs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($grpName in $protectedGroups) {
+        $grp = Invoke-Searcher -Filter "(&(objectClass=group)(sAMAccountName=$grpName))" -Props @('member')
+        if ($grp) {
+            foreach ($g in $grp) {
+                if ($g.Properties['member']) { foreach ($m in $g.Properties['member']) { [void]$protectedDNs.Add("$m") } }
+            }
+        }
+    }
+
+    $orphaned = [System.Collections.Generic.List[hashtable]]::new()
+    foreach ($u in $adminCountAccts) {
+        $dn = "$($u.Properties['distinguishedname'][0])"
+        if (-not $protectedDNs.Contains($dn)) {
+            $orphaned.Add(@{ Account="$($u.Properties['samaccountname'][0])"; DN=$dn }) | Out-Null
+        }
+    }
+
+    if ($orphaned.Count -gt 0) {
+        Add-Finding -Category 'Accounts' -RuleId 'S-OrphanAdminCount' `
+            -Title "$($orphaned.Count) account(s) carry adminCount=1 but are not in any protected group (ghost privilege)" `
+            -Risk 'Medium' `
+            -Detail "These accounts previously held privileged group membership. SDProp stamped adminCount=1 and applied a hardened ACL. After removal from the privileged group, adminCount was never cleared. The accounts retain hardened ACLs that block inheritance and appear privileged to auditing tools. A common persistence artefact — attackers add a backdoor account to DA, SDProp fires, they remove it but adminCount persists." `
+            -Remediation "For each account: verify it should not be privileged. Then: (1) Set-ADUser -Identity <sam> -Clear adminCount  (2) In ADUC > Account Properties > Security > Advanced, re-enable ACL inheritance." `
+            -Data $orphaned
+    } else {
+        Write-OK "adminCount: no orphaned accounts found"
+    }
+}
+
+#endregion
+
+#region ── CHECK: Print Spooler on Domain Controllers ─────────────────────────
+
+function Invoke-CheckPrintSpoolerDC {
+    Write-Status "Probing Print Spooler service on Domain Controllers..."
+
+    $dcObjects = Invoke-Searcher `
+        -Filter "(&(objectCategory=computer)(userAccountControl:1.2.840.113556.1.4.803:=8192))" `
+        -Props @('dNSHostName','name')
+
+    $spoolerRunning = [System.Collections.Generic.List[hashtable]]::new()
+
+    foreach ($dc in $dcObjects) {
+        $hostname = if ($dc.Properties['dnshostname'].Count -gt 0) { "$($dc.Properties['dnshostname'][0])" } `
+                    else { "$($dc.Properties['name'][0])" }
+        try {
+            $fs = [System.IO.File]::Open("\\$hostname\pipe\spoolss",
+                  [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+            $fs.Close()
+            $spoolerRunning.Add(@{ DC=$hostname; Status='Running (pipe open)' }) | Out-Null
+        } catch [System.UnauthorizedAccessException] {
+            $spoolerRunning.Add(@{ DC=$hostname; Status='Running (pipe exists, access denied)' }) | Out-Null
+        } catch { }
+    }
+
+    if ($spoolerRunning.Count -gt 0) {
+        Add-Finding -Category 'DomainControllers' -RuleId 'S-PrintSpoolerDC' `
+            -Title "$($spoolerRunning.Count) DC(s) have Print Spooler running — PrintNightmare / coerce attack surface" `
+            -Risk 'High' `
+            -Detail "The Print Spooler on DCs enables forced authentication coercion: any domain user can trigger a DC to authenticate outbound to an attacker machine via MS-RPRN or MS-EFSRPC. Combined with unconstrained delegation capture or NTLM relay to LDAP, this achieves full domain compromise without any credentials. Also exposes CVE-2021-34527 (PrintNightmare) for local privilege escalation to SYSTEM." `
+            -Remediation "Disable on all DCs: Stop-Service Spooler -Force; Set-Service Spooler -StartupType Disabled. Enforce via GPO: Computer Config > Windows Settings > System Services > Print Spooler = Disabled. Confirm no print jobs originate from DCs before disabling." `
+            -Data $spoolerRunning
+    } else {
+        Write-OK "Print Spooler: not running on any DC"
+    }
+}
+
+#endregion
+
+#region ── CHECK: Inactive / Unlinked GPOs ────────────────────────────────────
+
+function Invoke-CheckInactiveGPOs {
+    Write-Status "Identifying unlinked Group Policy Objects..."
+
+    $gpoContainer = "CN=Policies,CN=System,$Script:NC"
+    $allGPOs = Invoke-Searcher `
+        -Filter "(objectClass=groupPolicyContainer)" `
+        -Props @('cn','displayName') `
+        -SearchBase $gpoContainer
+
+    if (-not $allGPOs -or @($allGPOs).Count -eq 0) { return }
+
+    $allGPOGuids = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $gpoCNtoName = @{}
+    foreach ($g in $allGPOs) {
+        $guid = "$($g.Properties['cn'][0])".Trim('{}').ToLower()
+        [void]$allGPOGuids.Add($guid)
+        $name = if ($g.Properties['displayname'].Count -gt 0) { "$($g.Properties['displayname'][0])" } else { $guid }
+        $gpoCNtoName[$guid] = $name
+    }
+
+    $linkedGuids = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    # Domain root
+    $domainObjs = Invoke-Searcher -Filter "(objectClass=domain)" -Props @('gPLink') -SearchBase $Script:NC -Scope 'Base'
+    # All OUs
+    $ouObjs = Invoke-Searcher -Filter "(objectClass=organizationalUnit)" -Props @('gPLink')
+    # Sites (in Configuration NC)
+    $siteObjs = Invoke-Searcher -Filter "(objectClass=site)" -Props @('gPLink') -SearchBase $Script:Config
+
+    foreach ($collection in @($domainObjs, $ouObjs, $siteObjs)) {
+        if (-not $collection) { continue }
+        foreach ($obj in $collection) {
+            $gpl = "$($obj.Properties['gplink'][0])"
+            if (-not $gpl) { continue }
+            $ms = [regex]::Matches($gpl, '\{([0-9a-fA-F\-]{36})\}')
+            foreach ($m in $ms) { [void]$linkedGuids.Add($m.Groups[1].Value.ToLower()) }
+        }
+    }
+
+    $builtIn = @('31b2f340-016d-11d2-945f-00c04fb984f9','6ac1786c-016f-11d2-945f-00c04fb984f9')
+    $unlinked = [System.Collections.Generic.List[hashtable]]::new()
+    foreach ($guid in $allGPOGuids) {
+        if (-not $linkedGuids.Contains($guid) -and $builtIn -notcontains $guid) {
+            $unlinked.Add(@{ GPO=$gpoCNtoName[$guid]; GUID=$guid }) | Out-Null
+        }
+    }
+
+    if ($unlinked.Count -gt 0) {
+        Add-Finding -Category 'GPO' -RuleId 'S-InactiveGPO' `
+            -Title "$($unlinked.Count) GPO(s) exist but are not linked to any OU, site, or domain" `
+            -Risk 'Low' `
+            -Detail "Unlinked GPOs are not enforced but remain editable objects in the domain. An attacker or insider with GPO edit rights (e.g. Authenticated Users, delegation leftovers) can modify an unlinked GPO and then link it to a sensitive OU — without creating a detectable new policy. Also indicates GPO sprawl and poor hygiene that complicates incident response." `
+            -Remediation "Open GPMC > Group Policy Objects. For each unlinked GPO: (1) Determine if needed — delete if not. (2) If kept, restrict edit delegation to Domain Admins only. (3) Monitor GPO link events (Event ID 5136) via Advanced Audit on DCs." `
+            -Data $unlinked
+    } else {
+        Write-OK "GPOs: all GPOs are linked"
+    }
+}
+
+#endregion
+
+#region ── CHECK: Foreign Security Principals ──────────────────────────────────
+
+function Invoke-CheckForeignSecurityPrincipals {
+    Write-Status "Checking for orphaned Foreign Security Principal objects..."
+
+    $fspBase = "CN=ForeignSecurityPrincipals,$Script:NC"
+    $fsps = Invoke-Searcher `
+        -Filter "(objectClass=foreignSecurityPrincipal)" `
+        -Props @('name','distinguishedName','memberOf') `
+        -SearchBase $fspBase
+
+    if (-not $fsps -or @($fsps).Count -eq 0) {
+        Write-OK "Foreign Security Principals: none"; return
+    }
+
+    # Collect SID prefixes of currently trusted domains
+    $trustedSIDPrefixes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $trusts = Invoke-Searcher -Filter "(objectClass=trustedDomain)" -Props @('securityIdentifier') `
+              -SearchBase "CN=System,$Script:NC"
+    foreach ($td in $trusts) {
+        $sidBytes = $td.Properties['securityidentifier'][0]
+        if ($sidBytes) {
+            try {
+                $sid    = New-Object System.Security.Principal.SecurityIdentifier($sidBytes, 0)
+                $prefix = ($sid.ToString() -replace '-\d+$','')
+                [void]$trustedSIDPrefixes.Add($prefix)
+            } catch {}
+        }
+    }
+
+    $wellKnown = @('S-1-5-11','S-1-1-0','S-1-5-7','S-1-5-4','S-1-5-2','S-1-5-1','S-1-5-32')
+    $orphaned  = [System.Collections.Generic.List[hashtable]]::new()
+
+    foreach ($fsp in $fsps) {
+        $sidStr = "$($fsp.Properties['name'][0])"
+        $isWK   = $wellKnown | Where-Object { $sidStr.StartsWith($_) }
+        if ($isWK) { continue }
+        $prefix   = ($sidStr -replace '-\d+$','')
+        $isTrusted= $trustedSIDPrefixes.Contains($prefix)
+        if (-not $isTrusted) {
+            $groups = @($fsp.Properties['memberof'])
+            $orphaned.Add(@{
+                SID      = $sidStr
+                Groups   = if ($groups.Count -gt 0) { ($groups | Select-Object -First 2) -join ' | ' } else { 'None' }
+            }) | Out-Null
+        }
+    }
+
+    if ($orphaned.Count -gt 0) {
+        Add-Finding -Category 'Accounts' -RuleId 'S-OrphanFSP' `
+            -Title "$($orphaned.Count) Foreign Security Principal(s) reference SIDs from non-trusted domains (orphaned)" `
+            -Risk 'Low' `
+            -Detail "Orphaned FSPs reference accounts from domains that no longer have an active trust relationship. These objects linger after trust removal and may hold group memberships that grant access rights. In an extreme scenario, if an attacker creates a domain with a matching SID range and re-establishes the trust, these FSPs would grant those attacker accounts the inherited permissions." `
+            -Remediation "List FSPs: Get-ADObject -SearchBase 'CN=ForeignSecurityPrincipals,DC=...' -Filter {objectClass -eq 'foreignSecurityPrincipal'} -Properties memberOf. Remove any without a corresponding active trust. Verify no ACLs reference these SIDs before deletion." `
+            -Data $orphaned
+    } else {
+        Write-OK "Foreign Security Principals: no orphaned FSPs found"
+    }
+}
+
+#endregion
+
 #region ── HTML Report ─────────────────────────────────────────────────────────
 
 function Get-RiskColor {
@@ -2921,6 +3137,10 @@ $checks = @(
     @{ Name='SitesSubnets';      Fn={ Invoke-CheckSitesSubnets } }
     @{ Name='BitLocker';         Fn={ Invoke-CheckBitLocker } }
     @{ Name='DNSZones';          Fn={ Invoke-CheckDNSZones } }
+    @{ Name='OrphanAdminCount';  Fn={ Invoke-CheckOrphanedAdminCount } }
+    @{ Name='PrintSpoolerDC';    Fn={ Invoke-CheckPrintSpoolerDC } }
+    @{ Name='InactiveGPOs';      Fn={ Invoke-CheckInactiveGPOs } }
+    @{ Name='ForeignSPs';        Fn={ Invoke-CheckForeignSecurityPrincipals } }
 )
 
 foreach ($check in $checks) {
