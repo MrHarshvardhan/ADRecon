@@ -1,32 +1,255 @@
 # AD-Recon
 
-> Community-built Active Directory security audit toolkit — no third-party tools, no RSAT required.
+> Community-built Active Directory & Azure AD security audit toolkit — no third-party tools, no RSAT required.
+
+**GitHub:** [github.com/MrHarshvardhan/ADRecon](https://github.com/MrHarshvardhan/ADRecon)
 
 ---
 
-## Overview
+## What is AD-Recon?
 
-**AD-Recon** is a self-contained PowerShell script that performs a comprehensive security audit of an Active Directory environment and outputs a single self-contained HTML report. It replicates (and extends) the checks performed by enterprise tools, using only built-in .NET ADSI / DirectorySearcher APIs.
+**AD-Recon** is a PowerShell script that scans your Active Directory (or Azure AD) environment for security misconfigurations and generates a single self-contained HTML report — like a health check for your domain.
 
-A companion script, **AzureAD-Recon**, covers Microsoft Entra ID (Azure AD) via the Microsoft Graph API.
+- No installation, no extra tools, no admin rights required
+- Works with just a standard domain user account
+- Report opens in any browser, works fully offline
 
-| Script | Target | Auth |
-|--------|--------|------|
-| `Invoke-ADRecon.ps1` | On-prem Active Directory | Domain credentials / ADSI |
-| `Invoke-AzureADRecon.ps1` | Entra ID / Azure AD | Graph API (device code, app secret, or MgGraph) |
+| Script | What it audits | How it connects |
+|--------|---------------|-----------------|
+| `Invoke-ADRecon.ps1` | On-premises Active Directory | LDAP (built-in .NET, no RSAT) |
+| `Invoke-AzureADRecon.ps1` | Entra ID / Azure AD | Microsoft Graph API |
 
 ---
 
-## Features
+## Quick Start — Run Directly from GitHub
 
-### AD Security Checks (27 modules)
+No need to clone the repo. Run directly in PowerShell:
+
+### On-premises Active Directory
+
+```powershell
+# One-liner: download and run immediately
+irm https://raw.githubusercontent.com/MrHarshvardhan/ADRecon/master/Invoke-ADRecon.ps1 | iex
+```
+
+```powershell
+# Or: download the file first, then run
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/MrHarshvardhan/ADRecon/master/Invoke-ADRecon.ps1 `
+                  -OutFile Invoke-ADRecon.ps1
+.\Invoke-ADRecon.ps1
+```
+
+### Azure AD / Entra ID
+
+```powershell
+# One-liner: download and run with browser login popup
+irm https://raw.githubusercontent.com/MrHarshvardhan/ADRecon/master/Invoke-AzureADRecon.ps1 | iex
+```
+
+```powershell
+# Or: download first, then run interactively
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/MrHarshvardhan/ADRecon/master/Invoke-AzureADRecon.ps1 `
+                  -OutFile Invoke-AzureADRecon.ps1
+.\Invoke-AzureADRecon.ps1 -UseDeviceCode -OpenBrowser
+```
+
+> **Execution policy note:** If PowerShell blocks the script, run this first:
+> ```powershell
+> Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy Bypass
+> ```
+
+---
+
+## Step-by-Step Guide — Active Directory Audit
+
+### Step 1 — Open PowerShell
+
+Open **PowerShell** (not CMD). You do not need to run as Administrator.
+
+### Step 2 — Download the script
+
+```powershell
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/MrHarshvardhan/ADRecon/master/Invoke-ADRecon.ps1 `
+                  -OutFile Invoke-ADRecon.ps1
+```
+
+### Step 3 — Run it
+
+**Option A — Audit your current domain (simplest, no extra parameters)**
+```powershell
+.\Invoke-ADRecon.ps1
+```
+Runs as your currently logged-in user against the domain your machine is joined to.
+
+**Option B — Audit with a specific user account**
+```powershell
+.\Invoke-ADRecon.ps1 -Username "CORP\auditor" -Password "P@ssw0rd!"
+```
+
+**Option C — Audit a remote domain or specific domain controller**
+```powershell
+.\Invoke-ADRecon.ps1 -Server "dc01.corp.local" -Username "CORP\auditor" -Password "P@ssw0rd!"
+```
+
+### Step 4 — Open the report
+
+The script generates an HTML file in the same folder:
+```
+ADRecon_corp.local_20240115_143022.html
+```
+Open it in any browser. No internet connection needed.
+
+---
+
+## Step-by-Step Guide — Azure AD / Entra ID Audit
+
+### Step 1 — Download the script
+
+```powershell
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/MrHarshvardhan/ADRecon/master/Invoke-AzureADRecon.ps1 `
+                  -OutFile Invoke-AzureADRecon.ps1
+```
+
+### Step 2 — Choose your login method
+
+#### Method 1 — Interactive login with browser popup (recommended for desktops)
+
+```powershell
+.\Invoke-AzureADRecon.ps1 -UseDeviceCode -OpenBrowser
+```
+
+**What happens:**
+1. Script prints a one-time code in the terminal
+2. Your default browser opens automatically to `https://microsoft.com/devicelogin`
+3. Enter the code and sign in with your Azure AD account
+4. Come back to the terminal — the audit starts automatically
+
+#### Method 2 — Interactive login without popup (for servers / SSH sessions)
+
+```powershell
+.\Invoke-AzureADRecon.ps1 -UseDeviceCode
+```
+
+**What happens:**
+1. Script prints a URL and a one-time code:
+   ```
+   To sign in, open https://microsoft.com/devicelogin
+   and enter the code: ABCD1234XY
+   ```
+2. Open the URL in any browser on any device
+3. Enter the code and sign in
+4. Audit starts automatically once login is complete
+
+#### Method 3 — App registration (automated / scheduled audits)
+
+Create an App Registration in Azure Portal with read-only permissions, then:
+
+```powershell
+.\Invoke-AzureADRecon.ps1 -TenantId  "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
+                           -ClientId  "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
+                           -ClientSecret "your-client-secret-here"
+```
+
+Required Graph API permissions for the app (all read-only):
+
+| Permission | Used for |
+|------------|---------|
+| `Directory.Read.All` | Users, groups, roles, devices |
+| `Policy.Read.All` | Conditional Access policies |
+| `AuditLog.Read.All` | Sign-in risk, audit logs |
+| `RoleManagement.Read.All` | PIM role assignments |
+| `Application.Read.All` | App secrets and permissions |
+| `UserAuthenticationMethod.Read.All` | Per-user MFA status |
+
+#### Method 4 — Reuse an existing Microsoft Graph session
+
+```powershell
+# If you already ran Connect-MgGraph earlier in the same session:
+Connect-MgGraph -Scopes "Directory.Read.All","Policy.Read.All","AuditLog.Read.All","RoleManagement.Read.All","Application.Read.All","UserAuthenticationMethod.Read.All"
+.\Invoke-AzureADRecon.ps1
+```
+
+#### Which method should I use?
+
+| Your situation | Use this |
+|---------------|---------|
+| Running on your own Windows/Mac laptop | `-UseDeviceCode -OpenBrowser` |
+| Running on a server or over SSH | `-UseDeviceCode` |
+| Scheduling an automated scan | `-TenantId` + `-ClientId` + `-ClientSecret` |
+| Already signed in via Connect-MgGraph | No parameters needed |
+
+### Step 3 — Open the report
+
+```
+AzureADRecon_<TenantId>_20240115_143022.html
+```
+Open in any browser — no internet needed.
+
+---
+
+## More Examples
+
+### Save the report to a specific folder
+
+```powershell
+.\Invoke-ADRecon.ps1 -OutputPath "C:\Audits\2024"
+.\Invoke-AzureADRecon.ps1 -UseDeviceCode -OutputPath "C:\Audits\2024"
+```
+
+### Skip specific checks
+
+```powershell
+# Skip GPP password and PKI checks (e.g., if SYSVOL access is restricted)
+.\Invoke-ADRecon.ps1 -SkipChecks "Invoke-CheckGPPPasswords","Invoke-CheckPKI"
+```
+
+### Audit a specific domain by FQDN
+
+```powershell
+.\Invoke-ADRecon.ps1 -Domain "subsidiary.corp.local"
+```
+
+### Audit with a pre-built credential object (no plaintext password in command)
+
+```powershell
+$cred = Get-Credential
+.\Invoke-ADRecon.ps1 -Credential $cred
+```
+
+### Disable colored output (for logging / CI pipelines)
+
+```powershell
+.\Invoke-ADRecon.ps1 -NoColor
+```
+
+---
+
+## What the Report Shows
+
+Both scripts generate a **self-contained HTML report**:
+
+- **Risk score** (0–100) shown as a ring gauge — higher is better
+- **Stats bar** — total users, computers, groups, DCs at a glance
+- **Findings** — each issue shown as a collapsible card with:
+  - Risk level (Critical / High / Medium / Low / Info)
+  - MITRE ATT&CK technique ID (linked to attack.mitre.org)
+  - Affected objects listed in a table (usernames, computer names, file paths, etc.)
+  - Step-by-step remediation guide
+- **Filter bar** — filter by risk level or search by keyword
+- **Export CSV** — download all findings as a spreadsheet
+
+---
+
+## What It Checks
+
+### Active Directory — 31 Security Modules
 
 | # | Module | What It Detects |
 |---|--------|-----------------|
 | 1 | Domain Info | Domain functional level, tombstone lifetime, recycle bin |
 | 2 | Domain Controllers | Missing patches, SMB signing, LDAP signing, outdated OS |
 | 3 | Krbtgt | Password age > 180 days, never-changed krbtgt |
-| 4 | Users | Accounts with no pre-auth, reversible encryption, DES-only, password never expires, stale accounts |
+| 4 | Users | No pre-auth (AS-REP), reversible encryption, DES-only, password never expires, stale accounts |
 | 5 | Computers | Outdated OS (XP/2003/Vista/2008), old password, unconstrained delegation |
 | 6 | Groups | Large groups, empty groups, non-admin members of Domain Admins |
 | 7 | Delegation | Unconstrained, constrained, resource-based constrained delegation |
@@ -34,24 +257,28 @@ A companion script, **AzureAD-Recon**, covers Microsoft Entra ID (Azure AD) via 
 | 9 | AdminSDHolder | Modified AdminSDHolder ACL (backdoor persistence) |
 | 10 | Trusts | External trusts, SID history enabled, SID filtering disabled |
 | 11 | PKI / ADCS | ESC1–8 misconfigurations, expired CAs, weak key sizes |
-| 12 | Security Settings | WDigest plaintext, NTLMv1 allowed, null sessions, WPAD, anonymous enumeration |
+| 12 | Security Settings | WDigest plaintext, NTLMv1, null sessions, WPAD, anonymous enumeration |
 | 13 | FSMO | FSMO role holders, time sync, RID pool consumption |
 | 14 | Sensitive Groups | Schema Admins, Account Operators, Backup Operators membership |
 | 15 | Builtin Accounts | Default Administrator/Guest account status |
-| 16 | GPP Passwords | MS14-025: cPassword in SYSVOL (cleartext passwords) |
+| 16 | GPP Passwords | MS14-025: cPassword in SYSVOL (cleartext passwords in Group Policy) |
 | 17 | Kerberos Encryption | RC4-only policies, AES not required |
-| 18 | GPO Security | Missing LAPS, AppLocker, Credential Guard, no screen lock |
-| 19 | Exchange | RBAC: WriteDACL/FullControl delegation (PrivExchange) |
+| 18 | GPO Security | Missing LAPS, AppLocker, Credential Guard, no screen lock GPO |
+| 19 | Exchange | RBAC WriteDACL/FullControl delegation (PrivExchange) |
 | 20 | ADCS Extended | Template anomalies, duplicate OIDs, manager approval bypass |
 | 21 | RODC | RODC password replication policy, privileged accounts cached |
 | 22 | Shadow Credentials | msDS-KeyCredentialLink on non-DC objects (persistence) |
 | 23 | Azure AD Connect | Stale sync, AZUREADSSOACC account (Pass-Through Auth) |
-| 24 | DNS Security | Wildcard records (WPAD), insecure update settings |
+| 24 | DNS Security | Wildcard records (WPAD), insecure dynamic update settings |
 | 25 | LAPS ACL | Who can read the LAPS ms-Mcs-AdmPwd attribute |
 | 26 | Display Specifiers | Malicious script hooks in display specifiers |
 | 27 | Fine-Grained PSOs | Password policies weaker than domain default |
+| 28 | Broad ACL | GenericAll / WriteDACL / WriteOwner on OUs and GPOs |
+| 29 | Sites & Subnets | AD site topology, orphaned subnets |
+| 30 | BitLocker ACL | Who can read BitLocker recovery keys from AD |
+| 31 | DNS Zones | DNSSEC status, zone inventory |
 
-### Azure AD / Entra ID Checks (11 modules)
+### Azure AD / Entra ID — 11 Security Modules
 
 | # | Module | What It Detects |
 |---|--------|-----------------|
@@ -71,156 +298,16 @@ A companion script, **AzureAD-Recon**, covers Microsoft Entra ID (Azure AD) via 
 
 ## Requirements
 
-### AD Script (`Invoke-ADRecon.ps1`)
+### `Invoke-ADRecon.ps1`
 - Windows PowerShell 5.1+ or PowerShell 7+
-- **No RSAT, no AD module, no third-party tools required**
-- Network access to LDAP (port 389/636) on a domain controller
-- Read access to the domain (standard domain user is sufficient for most checks)
-- Write/SMB access not required
+- No RSAT, no AD module, no third-party tools
+- Network access to a domain controller on port 389 (LDAP)
+- Standard domain user account (read-only access is enough for most checks)
 
-### Azure AD Script (`Invoke-AzureADRecon.ps1`)
+### `Invoke-AzureADRecon.ps1`
 - PowerShell 5.1+ or PowerShell 7+
-- One of the following:
-  - An active `Connect-MgGraph` session (Microsoft.Graph module)
-  - Entra ID App Registration with client credentials (ClientId + ClientSecret or Certificate)
-  - Interactive device-code login (prompts in browser)
-- Required Graph API permissions (read-only):
-  `Directory.Read.All`, `Policy.Read.All`, `AuditLog.Read.All`, `IdentityRiskyUser.Read.All`, `PrivilegedAccess.Read.AzureAD`
-
----
-
-## Quick Start
-
-### Audit current domain (logged-in user)
-
-```powershell
-.\Invoke-ADRecon.ps1
-```
-
-### Audit with alternate credentials
-
-```powershell
-.\Invoke-ADRecon.ps1 -Username "CORP\auditor" -Password "P@ssw0rd!"
-```
-
-### Audit remote domain / specific DC
-
-```powershell
-.\Invoke-ADRecon.ps1 -Server "dc01.corp.local" -Username "CORP\auditor" -Password "P@ssw0rd!"
-```
-
-### Skip specific checks
-
-```powershell
-.\Invoke-ADRecon.ps1 -SkipChecks "Invoke-CheckGPPPasswords","Invoke-CheckPKI"
-```
-
-### Save report to specific folder
-
-```powershell
-.\Invoke-ADRecon.ps1 -OutputPath "C:\Audits\2024"
-```
-
-### Azure AD — device code (interactive, manual browser)
-
-Script prints a URL and a one-time code in the terminal. You open the URL in any browser and type the code.
-
-```powershell
-.\Invoke-AzureADRecon.ps1 -UseDeviceCode
-```
-
-**Terminal output example:**
-```
-  [*] Starting device code authentication...
-
-  To sign in, use a web browser to open the page https://microsoft.com/devicelogin
-  and enter the code ABCD1234XY to authenticate.
-```
-
-### Azure AD — device code with automatic browser popup
-
-Same as above, but the script opens `https://microsoft.com/devicelogin` in your default browser automatically. Works on Windows, macOS, and Linux (requires `xdg-open`).
-
-```powershell
-.\Invoke-AzureADRecon.ps1 -UseDeviceCode -OpenBrowser
-```
-
-**What happens:**
-1. Script requests a device code from Microsoft
-2. Prints the one-time code in the terminal
-3. Automatically opens `https://microsoft.com/devicelogin` in your default browser
-4. You enter the code and sign in with your Azure AD account
-5. Script detects the completed login and starts the audit
-
-> **Note**: `-OpenBrowser` is optional. If the browser cannot be opened (e.g., headless server, SSH session), the script falls back gracefully and asks you to open the URL manually. No credentials are stored anywhere.
-
-### Azure AD — app registration (unattended / scheduled)
-
-For automated or scheduled audits — no interactive login required.
-
-```powershell
-.\Invoke-AzureADRecon.ps1 -TenantId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
-                           -ClientId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
-                           -ClientSecret "your-secret-here"
-```
-
-**Required Graph API permissions (read-only) for the app registration:**
-
-| Permission | Why |
-|------------|-----|
-| `Directory.Read.All` | Users, groups, roles, devices |
-| `Policy.Read.All` | Conditional Access, auth methods |
-| `AuditLog.Read.All` | Sign-in risk data |
-| `RoleManagement.Read.All` | PIM role assignments |
-| `Application.Read.All` | App secrets, high-priv permissions |
-| `UserAuthenticationMethod.Read.All` | Per-user MFA status |
-
-### Azure AD — reuse existing MgGraph session
-
-```powershell
-Connect-MgGraph -Scopes "Directory.Read.All","Policy.Read.All","AuditLog.Read.All"
-.\Invoke-AzureADRecon.ps1
-```
-
-### Azure AD — authentication decision guide
-
-| Scenario | Recommended method |
-|----------|--------------------|
-| Quick one-off audit on your desktop | `-UseDeviceCode -OpenBrowser` |
-| Headless server / SSH / no GUI | `-UseDeviceCode` (copy URL+code manually) |
-| Scheduled / automated audit | `-ClientId` + `-ClientSecret` (app registration) |
-| Already have an MgGraph session open | No parameters needed |
-
----
-
-## Credential Setup (Editing the Script)
-
-If you prefer to embed credentials directly for lab/testing use, open the script and locate the `param()` block at the top:
-
-```powershell
-[string]$Password = '',     # Replace <password> with your password here
-```
-
-Change `''` to your password. The script auto-builds a `PSCredential` object from Username + Password when both are provided.
-
-> **Warning**: Never commit credentials to source control. For production use, pass credentials at runtime with `-Username` / `-Password` parameters or use a secrets manager.
-
----
-
-## Output
-
-Both scripts generate a **self-contained HTML report** in the current directory (or `-OutputPath`):
-
-- `ADRecon_<DomainName>_<Timestamp>.html`
-- `AzureADRecon_<TenantId>_<Timestamp>.html`
-
-The report includes:
-- **Risk score** (0–100) displayed as a ring gauge
-- **Statistics grid** (users, computers, groups, DCs)
-- **Findings table** grouped by category with Risk level (Critical / High / Medium / Low / Info)
-- **Remediation guidance** for each finding
-- **Failed modules** section (checks that errored are listed but don't stop the audit)
-- No external CDN / internet dependency — fully offline-safe
+- Internet access to `login.microsoftonline.com` and `graph.microsoft.com`
+- An Azure AD account (or app registration) with the read-only permissions listed above
 
 ---
 
@@ -230,14 +317,14 @@ The report includes:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `-Domain` | String | *(current)* | Target AD domain FQDN |
-| `-Server` | String | *(auto)* | DC hostname or IP |
-| `-Username` | String | *(current user)* | Alternate username (DOMAIN\user) |
+| `-Domain` | String | *(current domain)* | Target AD domain FQDN, e.g. `corp.local` |
+| `-Server` | String | *(auto-detected)* | DC hostname or IP to connect to |
+| `-Username` | String | *(current user)* | Alternate username in `DOMAIN\user` format |
 | `-Password` | String | *(none)* | Alternate password |
-| `-Credential` | PSCredential | *(none)* | Pre-built credential object |
-| `-OutputPath` | String | *(current dir)* | Folder for HTML report |
-| `-SkipChecks` | String[] | *(none)* | Module names to skip |
-| `-NoColor` | Switch | *(false)* | Disable console colors |
+| `-Credential` | PSCredential | *(none)* | Pre-built credential object from `Get-Credential` |
+| `-OutputPath` | String | *(current folder)* | Folder where the HTML report is saved |
+| `-SkipChecks` | String[] | *(none)* | List of module names to skip |
+| `-NoColor` | Switch | *(false)* | Disable colored console output |
 
 ### `Invoke-AzureADRecon.ps1`
 
@@ -246,27 +333,27 @@ The report includes:
 | `-TenantId` | String | *(none)* | Entra ID tenant GUID |
 | `-ClientId` | String | *(none)* | App registration client ID |
 | `-ClientSecret` | String | *(none)* | App registration secret |
-| `-CertificateThumbprint` | String | *(none)* | Certificate-based auth |
-| `-UseDeviceCode` | Switch | *(false)* | Prompt for device-code login (prints URL + code in terminal) |
-| `-OpenBrowser` | Switch | *(false)* | Auto-open `microsoft.com/devicelogin` in default browser (use with `-UseDeviceCode`) |
-| `-OutputPath` | String | *(current dir)* | Folder for HTML report |
-| `-SkipChecks` | String[] | *(none)* | Module names to skip |
+| `-CertificateThumbprint` | String | *(none)* | Certificate-based auth thumbprint |
+| `-UseDeviceCode` | Switch | *(false)* | Interactive login — prints URL + code in terminal |
+| `-OpenBrowser` | Switch | *(false)* | Auto-open `microsoft.com/devicelogin` in your browser (use with `-UseDeviceCode`) |
+| `-OutputPath` | String | *(current folder)* | Folder where the HTML report is saved |
+| `-SkipChecks` | String[] | *(none)* | List of module names to skip |
 
 ---
 
 ## Risk Scoring
 
-Each finding is assigned a risk level:
+Each finding reduces the score from a starting point of 100:
 
-| Level | Score Impact | Typical Examples |
-|-------|-------------|-----------------|
-| Critical | -20 | DCSync rights, AS-REP Roasting, ESC1, null sessions |
-| High | -10 | Unconstrained delegation, krbtgt age > 180d, WDigest |
-| Medium | -5 | GPO missing LAPS, password never expires, old OS |
-| Low | -2 | Empty groups, info-level config |
-| Info | 0 | Informational observations |
+| Level | Score Impact | Examples |
+|-------|-------------|---------|
+| Critical | −20 | DCSync rights, AS-REP Roasting, ADCS ESC1, null sessions |
+| High | −10 | Unconstrained delegation, krbtgt password age > 180 days, WDigest enabled |
+| Medium | −5 | Missing LAPS, password never expires, outdated OS |
+| Low | −2 | Empty groups, weak PSO |
+| Info | 0 | Informational findings only |
 
-A domain with no findings scores 100. Real environments typically score 40–80.
+A domain with no issues scores **100**. Most real environments score between **40–80**.
 
 ---
 
@@ -275,45 +362,20 @@ A domain with no findings scores 100. Real environments typically score 40–80.
 ```
 Invoke-ADRecon.ps1
 │
-├── ADSI / DirectorySearcher  (no RSAT dependency)
-├── 27 isolated check modules (each in try/catch)
-├── Central Add-Finding collector
-└── HTML report generator (self-contained)
+├── ADSI / DirectorySearcher  (no RSAT — works with any domain user)
+├── 31 isolated check modules (each in try/catch — one failure never stops the rest)
+├── Add-Finding collector
+└── HTML report generator (fully self-contained, no CDN, works offline)
 
 Invoke-AzureADRecon.ps1
 │
 ├── Microsoft Graph REST API
-│   ├── Token: MgGraph session | Client credentials | Device code
-│   └── Auto-pagination (Get-GraphAll)
+│   ├── Auth: Device code | Client credentials | MgGraph session
+│   └── Auto-pagination (handles tenants with thousands of objects)
 ├── 11 isolated check modules
-├── Central Add-Finding collector
-└── HTML report generator (self-contained)
+├── Add-Finding collector
+└── HTML report generator (same design, Azure blue theme)
 ```
-
----
-
-## Comparison with PingCastle
-
-| Feature | AD-Recon | PingCastle |
-|---------|----------|------------|
-| License | Open / Community | Source-available (custom license) |
-| Language | PowerShell | C# (.NET) |
-| RSAT required | No | No |
-| External tools | None | None |
-| ADCS checks | ESC1–8 | ESC1–8 |
-| Azure AD checks | Via separate script | Built-in |
-| HTML report | Yes | Yes |
-| JSON output | No | Yes |
-| SMTP scoring | Custom | Proprietary algorithm |
-| Authentication | ADSI + Graph | ADSI + Graph |
-
----
-
-## Legal / Disclaimer
-
-> **This tool is for authorized security assessments only.**
->
-> Only run this script against domains and tenants for which you have explicit written authorization. Unauthorized use against systems you do not own or have permission to audit is illegal in most jurisdictions.
 
 ---
 
@@ -321,19 +383,27 @@ Invoke-AzureADRecon.ps1
 
 Pull requests welcome. When adding a new check module:
 
-1. Follow the naming convention: `Invoke-Check<Topic>`
-2. Wrap all logic in `try/catch` — never throw; call `Add-Finding` for findings
-3. Use `Invoke-Searcher` for LDAP queries (handles credentials and server binding automatically)
-4. Add the function to the `$checks` array in the main execution block
-5. Document the LDAP filter and UAC bit used in comments
+1. Name it `Invoke-Check<Topic>` (e.g., `Invoke-CheckKerberoast`)
+2. Wrap all logic in `try/catch` — never throw; call `Add-Finding` for each issue found
+3. Use `Invoke-Searcher` for LDAP queries (handles credentials and DC binding automatically)
+4. Add the module to the `$checks` array in the main execution block
+5. Add a MITRE ATT&CK mapping entry to `$Script:MitreTTPMap` if applicable
+
+---
+
+## Legal / Disclaimer
+
+> **For authorized security assessments only.**
+>
+> Only run this tool against domains and tenants for which you have explicit written authorization. Unauthorized use is illegal in most jurisdictions.
 
 ---
 
 ## Author
 
-Tool: AD-Recon / AzureAD-Recon  
-Built on techniques from PingCastle, BloodHound documentation, and Microsoft's own security baselines.
+GitHub: [github.com/MrHarshvardhan](https://github.com/MrHarshvardhan)
+Built on BloodHound documentation, Microsoft's own security baselines, and AD attack research.
 
 ---
 
-*AD-Recon by Harsh — community AD security audit toolkit*
+*AD-Recon by Harsh P — community AD security audit toolkit*
