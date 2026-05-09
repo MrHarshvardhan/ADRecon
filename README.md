@@ -1,4 +1,4 @@
-# AD-Recon by Harsh P
+# AD-Recon
 
 > Community-built Active Directory security audit toolkit — no third-party tools, no RSAT required.
 
@@ -314,8 +314,6 @@ Invoke-AzureADRecon.ps1
 > **This tool is for authorized security assessments only.**
 >
 > Only run this script against domains and tenants for which you have explicit written authorization. Unauthorized use against systems you do not own or have permission to audit is illegal in most jurisdictions.
->
-> The author (Harsh P) accepts no liability for misuse or damage caused by this tool.
 
 ---
 
@@ -333,10 +331,9 @@ Pull requests welcome. When adding a new check module:
 
 ## Author
 
-**Harsh P** — Security Engineer  
 Tool: AD-Recon / AzureAD-Recon  
 Built on techniques from PingCastle, BloodHound documentation, and Microsoft's own security baselines.
 
 ---
 
-*AD-Recon by Harsh P — community AD security audit toolkit*
+*AD-Recon by Harsh — community AD security audit toolkit*
